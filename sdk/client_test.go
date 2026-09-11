@@ -1,0 +1,142 @@
+package magpiesdk
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"testing"
+	"time"
+)
+
+func TestLoadSendsAPIKeyAndDoesNotCache(t *testing.T) {
+	requestCount := 0
+	httpClient := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Header.Get("Authorization") != "Bearer mgp_test" {
+			t.Fatalf("authorization header mismatch: %q", r.Header.Get("Authorization"))
+		}
+		if r.URL.Scheme != "http" || r.URL.Host != "magpie.test" || r.URL.Path != "/v1/configs/app2-prod" || r.URL.Query().Get("meta") != "true" {
+			t.Fatalf("unexpected request url: %s", r.URL.String())
+		}
+		if got := r.Header.Get("If-None-Match"); got != "" {
+			t.Fatalf("sdk should not send conditional cache header, got %q", got)
+		}
+		requestCount++
+		header := http.Header{}
+		header.Set("ETag", fmt.Sprintf(`"app2-prod-%d-abc"`, requestCount))
+		return newTestResponse(http.StatusOK, header, resultPayload[Snapshot]{
+			Code: 0,
+			Data: Snapshot{AppName: "app2-prod", Format: "toml", Content: fmt.Sprintf("[server]\nport = %d\n", requestCount), Version: int64(requestCount), UpdatedAt: time.Unix(10, 0).UTC()},
+		}), nil
+	})}
+
+	client, err := New(Options{Endpoint: "http://magpie.test", AppName: "app2-prod", APIKey: "mgp_test", HTTPClient: httpClient})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	first, err := client.Load(context.Background())
+	if err != nil {
+		t.Fatalf("first load: %v", err)
+	}
+	if first.Content == "" || first.ETag == "" {
+		t.Fatalf("unexpected first snapshot: %+v", first)
+	}
+	second, err := client.Load(context.Background())
+	if err != nil {
+		t.Fatalf("second load: %v", err)
+	}
+	if requestCount != 2 {
+		t.Fatalf("expected two real requests, got %d", requestCount)
+	}
+	if second.Version != 2 || second.Content == first.Content {
+		t.Fatalf("expected second load to fetch fresh content: first=%+v second=%+v", first, second)
+	}
+}
+
+func TestLoadTOMLDecodesContent(t *testing.T) {
+	type appConfig struct {
+		Server struct {
+			Port int `toml:"port"`
+		} `toml:"server"`
+	}
+
+	httpClient := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return newTestResponse(http.StatusOK, nil, resultPayload[Snapshot]{
+			Code: 0,
+			Data: Snapshot{AppName: "app2-prod", Format: "toml", Content: "[server]\nport = 8080\n", Version: 1},
+		}), nil
+	})}
+	client, err := New(Options{Endpoint: "http://magpie.test", AppName: "app2-prod", APIKey: "mgp_test", HTTPClient: httpClient})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	var cfg appConfig
+	snapshot, err := client.LoadTOML(context.Background(), &cfg)
+	if err != nil {
+		t.Fatalf("load toml: %v", err)
+	}
+	if snapshot.Format != "toml" || cfg.Server.Port != 8080 {
+		t.Fatalf("unexpected decoded config: snapshot=%+v cfg=%+v", snapshot, cfg)
+	}
+}
+
+func TestLoadParsesServerError(t *testing.T) {
+	httpClient := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return newTestResponse(http.StatusForbidden, nil, resultPayload[json.RawMessage]{Code: 1, Msg: "API 密钥无权读取该应用"}), nil
+	})}
+
+	client, err := New(Options{Endpoint: "http://magpie.test", AppName: "app2-prod", APIKey: "mgp_test", HTTPClient: httpClient})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	_, err = client.Load(context.Background())
+	var serverErr *ServerError
+	if !errors.As(err, &serverErr) {
+		t.Fatalf("expected ServerError, got %T: %v", err, err)
+	}
+	if serverErr.StatusCode != http.StatusForbidden || serverErr.Msg != "API 密钥无权读取该应用" {
+		t.Fatalf("unexpected server error: %+v", serverErr)
+	}
+}
+
+func TestNewValidatesOptions(t *testing.T) {
+	if _, err := New(Options{}); err == nil {
+		t.Fatal("expected empty endpoint to fail")
+	}
+	if _, err := New(Options{Endpoint: "http://127.0.0.1:8081", APIKey: "mgp"}); err == nil {
+		t.Fatal("expected empty appName to fail")
+	}
+	if _, err := New(Options{Endpoint: "http://127.0.0.1:8081", AppName: "app"}); err == nil {
+		t.Fatal("expected empty apiKey to fail")
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
+
+func newTestResponse(statusCode int, header http.Header, body any) *http.Response {
+	if header == nil {
+		header = http.Header{}
+	}
+	var reader io.Reader
+	if body == nil {
+		reader = bytes.NewReader(nil)
+	} else {
+		buf := bytes.NewBuffer(nil)
+		_ = json.NewEncoder(buf).Encode(body)
+		reader = buf
+	}
+	return &http.Response{
+		StatusCode: statusCode,
+		Status:     http.StatusText(statusCode),
+		Header:     header,
+		Body:       io.NopCloser(reader),
+	}
+}

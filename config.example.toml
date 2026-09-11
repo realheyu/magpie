@@ -1,0 +1,32 @@
+[server]
+adminAddr = ":8080"
+apiAddr = ":8081"
+ginMode = "release"
+
+[mysql]
+# dsn 优先级最高；如果设置 dsn，addr/user/password/database 会被忽略。
+dsn = ""
+addr = "127.0.0.1:3306"
+user = "magpie_user"
+password = ""
+database = "magpie"
+
+[bootstrap]
+username = "admin"
+password = "change-me"
+
+[session]
+ttlHours = 24
+
+[log]
+level = "info"
+console = true
+ginRequest = false
+
+[log.file]
+enabled = true
+filename = "logs/magpie.log"
+maxSizeMb = 100
+maxBackups = 10
+maxAgeDays = 30
+compress = true

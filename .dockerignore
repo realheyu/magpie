@@ -1,0 +1,13 @@
+.git
+.gitignore
+.DS_Store
+.env
+config.toml
+logs/
+magpie
+bin/
+coverage.out
+.idea/
+.pnpm-store/
+web/node_modules/
+web/dist/
