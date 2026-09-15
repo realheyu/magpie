@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/realheyu/magpie/internal/domain"
@@ -12,7 +13,10 @@ import (
 	"gorm.io/gorm/logger"
 )
 
-var ErrNotFound = gorm.ErrRecordNotFound
+var (
+	ErrNotFound       = gorm.ErrRecordNotFound
+	ErrVersionConflict = errors.New("配置已被他人修改，请刷新后重试")
+)
 
 type Store struct {
 	db *gorm.DB
@@ -135,6 +139,12 @@ func (s *Store) CreateUser(username, displayName, password, role, status string)
 	if status == "" {
 		status = domain.StatusActive
 	}
+	if !domain.ValidRole(role) {
+		return nil, fmt.Errorf("无效的角色：%s", role)
+	}
+	if !domain.ValidStatus(status) {
+		return nil, fmt.Errorf("无效的状态：%s", status)
+	}
 	hash, salt, err := security.HashPassword(password)
 	if err != nil {
 		return nil, err
@@ -148,6 +158,12 @@ func (s *Store) UpdateUser(id uint64, displayName, password, role, status string
 	var user User
 	if err := s.db.First(&user, id).Error; err != nil {
 		return nil, err
+	}
+	if role != "" && !domain.ValidRole(role) {
+		return nil, fmt.Errorf("无效的角色：%s", role)
+	}
+	if status != "" && !domain.ValidStatus(status) {
+		return nil, fmt.Errorf("无效的状态：%s", status)
 	}
 	updates := map[string]any{"updated_at": time.Now().UTC()}
 	if displayName != "" {
@@ -184,6 +200,10 @@ func (s *Store) DeleteUser(id uint64) error {
 
 func (s *Store) CreateApp(app *App, actorUserID uint64, changeSummary string) error {
 	now := time.Now().UTC()
+	if !domain.ValidAppName(strings.TrimSpace(app.AppName)) {
+		return errors.New("应用名只能包含小写字母、数字、- 和 _，且以字母开头")
+	}
+	app.AppName = strings.TrimSpace(app.AppName)
 	format, err := domain.ResolveFormat(app.Format)
 	if err != nil {
 		return err
@@ -194,6 +214,9 @@ func (s *Store) CreateApp(app *App, actorUserID uint64, changeSummary string) er
 	}
 	if app.Status == "" {
 		app.Status = domain.StatusActive
+	}
+	if !domain.ValidStatus(app.Status) {
+		return fmt.Errorf("无效的状态：%s", app.Status)
 	}
 	app.Version = 1
 	app.CreatedAt = now
@@ -224,13 +247,33 @@ func (s *Store) UpdateApp(appName string, description, format, content string, s
 		app.Content = content
 		app.Sensitive = sensitive
 		if status != "" {
+			if !domain.ValidStatus(status) {
+				return fmt.Errorf("无效的状态：%s", status)
+			}
 			app.Status = status
 		}
-		app.Version++
-		app.UpdatedAt = time.Now().UTC()
-		if err := tx.Save(&app).Error; err != nil {
-			return err
+		// 乐观锁：WHERE 带上读到的 version，并发修改时影响行数为 0，放弃本次写入
+		newVersion := app.Version + 1
+		now := time.Now().UTC()
+		result := tx.Model(&App{}).
+			Where("id = ? AND version = ?", app.ID, app.Version).
+			Updates(map[string]any{
+				"description": app.Description,
+				"format":      app.Format,
+				"content":     app.Content,
+				"sensitive":   app.Sensitive,
+				"status":      app.Status,
+				"version":     newVersion,
+				"updated_at":  now,
+			})
+		if result.Error != nil {
+			return result.Error
 		}
+		if result.RowsAffected == 0 {
+			return ErrVersionConflict
+		}
+		app.Version = newVersion
+		app.UpdatedAt = now
 		return createRevisionAndAudit(tx, &app, actorUserID, changeSummary, "app.update")
 	}); err != nil {
 		return nil, err
@@ -310,6 +353,13 @@ func (s *Store) ListUserPermissions(userID uint64) ([]UserAppPermission, []App, 
 
 func (s *Store) ReplaceUserPermissions(userID uint64, entries map[string]string, actorUserID uint64) error {
 	return s.db.Transaction(func(tx *gorm.DB) error {
+		var count int64
+		if err := tx.Model(&User{}).Where("id = ?", userID).Count(&count).Error; err != nil {
+			return err
+		}
+		if count == 0 {
+			return gorm.ErrRecordNotFound
+		}
 		if err := tx.Where("user_id = ?", userID).Delete(&UserAppPermission{}).Error; err != nil {
 			return err
 		}
@@ -351,14 +401,29 @@ func (s *Store) RollbackApp(appName string, version int64, actorUserID uint64) (
 		return nil, err
 	}
 	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		// 与 UpdateApp 相同的乐观锁策略
+		newVersion := app.Version + 1
+		now := time.Now().UTC()
+		result := tx.Model(&App{}).
+			Where("id = ? AND version = ?", app.ID, app.Version).
+			Updates(map[string]any{
+				"format":     revision.Format,
+				"content":    revision.Content,
+				"sensitive":  revision.Sensitive,
+				"version":    newVersion,
+				"updated_at": now,
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return ErrVersionConflict
+		}
 		app.Format = revision.Format
 		app.Content = revision.Content
 		app.Sensitive = revision.Sensitive
-		app.Version++
-		app.UpdatedAt = time.Now().UTC()
-		if err := tx.Save(&app).Error; err != nil {
-			return err
-		}
+		app.Version = newVersion
+		app.UpdatedAt = now
 		return createRevisionAndAudit(tx, &app, actorUserID, fmt.Sprintf("回滚到版本 %d", version), "app.rollback")
 	}); err != nil {
 		return nil, err
@@ -393,6 +458,13 @@ func (s *Store) ListAPIKeys(page, pageSize int) ([]APIKey, int64, error) {
 
 func (s *Store) ReplaceAPIKeyApps(apiKeyID uint64, appNames []string, actorUserID uint64) error {
 	return s.db.Transaction(func(tx *gorm.DB) error {
+		var count int64
+		if err := tx.Model(&APIKey{}).Where("id = ?", apiKeyID).Count(&count).Error; err != nil {
+			return err
+		}
+		if count == 0 {
+			return gorm.ErrRecordNotFound
+		}
 		if err := replaceAPIKeyApps(tx, apiKeyID, appNames); err != nil {
 			return err
 		}

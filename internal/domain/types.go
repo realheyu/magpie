@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -62,8 +63,23 @@ func ResolveFormat(format string) (string, error) {
 	return NormalizeFormat(format), nil
 }
 
+// 应用名会进 URL 路径、ETag 头和数据库唯一索引，只允许小写字母、数字、-、_，且以字母开头。
+var appNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,127}$`)
+
+func ValidAppName(name string) bool {
+	return appNamePattern.MatchString(name)
+}
+
 func ValidPermission(permission string) bool {
 	return permission == PermissionFull || permission == PermissionMasked
+}
+
+func ValidRole(role string) bool {
+	return role == RoleAdmin || role == RoleUser
+}
+
+func ValidStatus(status string) bool {
+	return status == StatusActive || status == StatusDisabled
 }
 
 func CanEdit(permission string) bool {

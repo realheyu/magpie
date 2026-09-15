@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/bt-smart/btutil/result"
 	"github.com/gin-gonic/gin"
@@ -77,7 +76,6 @@ func (h *Handler) login(c *gin.Context) {
 		fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.SetCookie("magpie_admin_token", token, int(time.Until(expiresAt).Seconds()), "/", "", false, true)
 	result.GinData(c, loginResponse{Token: token, ExpiresAt: expiresAt, User: toUserResp(user)})
 }
 
@@ -85,10 +83,6 @@ func (h *Handler) logout(c *gin.Context) {
 	if token := bearerToken(c); token != "" {
 		h.sessions.Revoke(token)
 	}
-	if cookieToken, err := c.Cookie("magpie_admin_token"); err == nil {
-		h.sessions.Revoke(cookieToken)
-	}
-	c.SetCookie("magpie_admin_token", "", -1, "/", "", false, true)
 	result.GinOk(c)
 }
 
@@ -122,6 +116,10 @@ func (h *Handler) createApp(c *gin.Context) {
 	}
 	if strings.TrimSpace(req.AppName) == "" {
 		fail(c, http.StatusOK, "应用名不能为空")
+		return
+	}
+	if !domain.ValidAppName(strings.TrimSpace(req.AppName)) {
+		fail(c, http.StatusOK, "应用名只能包含小写字母、数字、- 和 _，且以字母开头")
 		return
 	}
 	format, err := domain.ResolveFormat(req.Format)
@@ -322,6 +320,10 @@ func (h *Handler) setUserPermissions(c *gin.Context) {
 		entries[permission.AppName] = permission.Permission
 	}
 	if err := h.store.ReplaceUserPermissions(id, entries, currentUser(c).ID); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			fail(c, http.StatusNotFound, "用户不存在")
+			return
+		}
 		fail(c, http.StatusOK, err.Error())
 		return
 	}
@@ -382,6 +384,10 @@ func (h *Handler) updateAPIKeyApps(c *gin.Context) {
 		return
 	}
 	if err := h.store.ReplaceAPIKeyApps(id, req.AppNames, currentUser(c).ID); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			fail(c, http.StatusNotFound, "API 密钥不存在")
+			return
+		}
 		fail(c, http.StatusOK, err.Error())
 		return
 	}
@@ -391,11 +397,6 @@ func (h *Handler) updateAPIKeyApps(c *gin.Context) {
 func (h *Handler) authRequired() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token := bearerToken(c)
-		if token == "" {
-			if cookieToken, err := c.Cookie("magpie_admin_token"); err == nil {
-				token = cookieToken
-			}
-		}
 		userID, ok := h.sessions.Validate(token)
 		if !ok {
 			fail(c, http.StatusUnauthorized, "请先登录")

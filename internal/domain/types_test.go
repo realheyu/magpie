@@ -17,6 +17,34 @@ func TestPermissionAndMasking(t *testing.T) {
 	}
 }
 
+func TestValidRoleAndStatus(t *testing.T) {
+	if !ValidRole(RoleAdmin) || !ValidRole(RoleUser) {
+		t.Fatal("built-in roles should be valid")
+	}
+	if ValidRole("superuser") {
+		t.Fatal("unknown role should be invalid")
+	}
+	if !ValidStatus(StatusActive) || !ValidStatus(StatusDisabled) {
+		t.Fatal("built-in statuses should be valid")
+	}
+	if ValidStatus("disable") {
+		t.Fatal("misspelled status should be invalid")
+	}
+}
+
+func TestValidAppName(t *testing.T) {
+	for _, name := range []string{"app", "a", "app2-prod", "a_b-c123"} {
+		if !ValidAppName(name) {
+			t.Fatalf("expected %q to be valid", name)
+		}
+	}
+	for _, name := range []string{"", "1app", "App", "app name", "应用", "-app", "_app", "app~name", "app/name"} {
+		if ValidAppName(name) {
+			t.Fatalf("expected %q to be invalid", name)
+		}
+	}
+}
+
 func TestNormalizeFormatDefaultsToTOML(t *testing.T) {
 	if NormalizeFormat("") != FormatTOML {
 		t.Fatal("empty format should default to toml")
