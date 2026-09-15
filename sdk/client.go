@@ -173,7 +173,12 @@ func (c *Client) Watch(ctx context.Context, interval time.Duration, onChange fun
 		case <-ticker.C:
 			snapshot, err := c.Load(ctx)
 			if err != nil {
-				return err
+				// 拉取失败按瞬时故障处理，跳过本轮、下个周期继续重试，
+				// 避免一次网络抖动就让监听协程退出；只有 ctx 取消才结束 Watch。
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				continue
 			}
 			if snapshotChanged(snapshot, lastETag, lastVersion) {
 				onChange(snapshot)

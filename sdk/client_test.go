@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -112,6 +113,47 @@ func TestNewValidatesOptions(t *testing.T) {
 	}
 	if _, err := New(Options{Endpoint: "http://127.0.0.1:8081", AppName: "app"}); err == nil {
 		t.Fatal("expected empty apiKey to fail")
+	}
+}
+
+func TestWatchSurvivesTransientErrors(t *testing.T) {
+	var requests atomic.Int32
+	changes := 0
+	etag := `"app2-prod-1-abc"`
+	httpClient := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		// 第 1 次是初始 Load；第 2 次模拟网络抖动；之后恢复正常且内容不变
+		if requests.Add(1) == 2 {
+			return nil, errors.New("transient network error")
+		}
+		header := http.Header{}
+		header.Set("ETag", etag)
+		return newTestResponse(http.StatusOK, header, resultPayload[Snapshot]{
+			Code: 0,
+			Data: Snapshot{AppName: "app2-prod", Format: "toml", Content: "[server]\nport = 8080\n", Version: 1, ETag: etag},
+		}), nil
+	})}
+
+	client, err := New(Options{Endpoint: "http://magpie.test", AppName: "app2-prod", APIKey: "mgp_test", HTTPClient: httpClient})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		for requests.Load() < 3 {
+			time.Sleep(time.Millisecond)
+		}
+		cancel()
+	}()
+	err = client.Watch(ctx, 5*time.Millisecond, func(Snapshot) { changes++ })
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+	if requests.Load() < 3 {
+		t.Fatalf("watch should keep polling after a transient error, requests=%d", requests.Load())
+	}
+	if changes != 1 {
+		t.Fatalf("expected only the initial snapshot callback, got %d", changes)
 	}
 }
 

@@ -79,7 +79,7 @@ fmt.Println(snapshot.Version, cfg.Server.Port)
 
 ## 监听变化
 
-`Watch` 会按间隔轮询配置 API，并用本次监听循环里的上一版 `ETag/version` 判断是否触发回调；它不会把配置内容持久化到本地。
+`Watch` 会按间隔轮询配置 API，并用本次监听循环里的上一版 `ETag/version` 判断是否触发回调；它不会把配置内容持久化到本地。轮询过程中遇到瞬时错误（网络抖动、服务端重启）会跳过当轮并在下个周期自动重试，只有 `ctx` 取消才会退出；首次 `Load` 失败仍会直接返回错误，方便启动时暴露配置地址或密钥问题。
 
 ```go
 err := client.Watch(context.Background(), 30*time.Second, func(snapshot magpiesdk.Snapshot) {
