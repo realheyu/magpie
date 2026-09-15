@@ -21,6 +21,16 @@
       </el-table-column>
     </el-table>
 
+    <div class="pagination-bar">
+      <el-pagination
+        v-model:current-page="page"
+        :page-size="pageSize"
+        :total="total"
+        layout="total, prev, pager, next"
+        @current-change="load"
+      />
+    </div>
+
     <el-dialog v-model="createDialog" title="新建 API 密钥" width="560px">
       <el-form label-position="top">
         <el-form-item label="名称">
@@ -53,6 +63,9 @@ import { api, type APIKeyItem, type AppConfig } from '@/api/client'
 
 const keys = ref<APIKeyItem[]>([])
 const apps = ref<AppConfig[]>([])
+const page = ref(1)
+const pageSize = 20
+const total = ref(0)
 const loading = ref(false)
 const createDialog = ref(false)
 const plainKey = ref('')
@@ -63,8 +76,13 @@ onMounted(load)
 async function load() {
   loading.value = true
   try {
-    const [keyPage, appPage] = await Promise.all([api.listAPIKeys(), api.listApps('', 1, 100)])
+    const [keyPage, appPage] = await Promise.all([api.listAPIKeys(page.value, pageSize), api.listApps('', 1, 100)])
+    if (keyPage.list.length === 0 && keyPage.total > 0 && page.value > 1) {
+      page.value = Math.ceil(keyPage.total / pageSize)
+      return load()
+    }
     keys.value = keyPage.list
+    total.value = keyPage.total
     apps.value = appPage.list
   } finally {
     loading.value = false

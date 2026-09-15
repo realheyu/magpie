@@ -6,7 +6,7 @@
         <p>每个应用维护一份完整配置内容。</p>
       </div>
       <div class="toolbar">
-        <el-input v-model="query" placeholder="搜索应用" clearable @change="load" />
+        <el-input v-model="query" placeholder="搜索应用" clearable @change="search" />
         <el-button type="primary" :icon="Plus" v-if="isAdmin" @click="openCreate">新建应用</el-button>
       </div>
     </div>
@@ -25,6 +25,16 @@
       </el-table-column>
       <el-table-column prop="updatedAt" label="更新时间" min-width="180" />
     </el-table>
+
+    <div class="pagination-bar">
+      <el-pagination
+        v-model:current-page="page"
+        :page-size="pageSize"
+        :total="total"
+        layout="total, prev, pager, next"
+        @current-change="load"
+      />
+    </div>
 
     <el-drawer v-model="editorOpen" size="58%" :title="editing?.appName || '新建应用'">
       <el-form v-if="draft" label-position="top" class="editor-form">
@@ -88,6 +98,9 @@ const auth = useAuthStore()
 const apps = ref<AppConfig[]>([])
 const revisions = ref<Revision[]>([])
 const query = ref('')
+const page = ref(1)
+const pageSize = 20
+const total = ref(0)
 const loading = ref(false)
 const saving = ref(false)
 const editorOpen = ref(false)
@@ -102,11 +115,21 @@ onMounted(load)
 async function load() {
   loading.value = true
   try {
-    const page = await api.listApps(query.value)
-    apps.value = page.list
+    const result = await api.listApps(query.value, page.value, pageSize)
+    if (result.list.length === 0 && result.total > 0 && page.value > 1) {
+      page.value = Math.ceil(result.total / pageSize)
+      return load()
+    }
+    apps.value = result.list
+    total.value = result.total
   } finally {
     loading.value = false
   }
+}
+
+function search() {
+  page.value = 1
+  load()
 }
 
 function openCreate() {

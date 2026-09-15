@@ -101,7 +101,8 @@ export const api = {
   revisions: (appName: string) => request<PageData<Revision>>(`/api/admin/apps/${encodeURIComponent(appName)}/revisions`),
   rollback: (appName: string, version: number) =>
     request<AppConfig>(`/api/admin/apps/${encodeURIComponent(appName)}/rollback`, { method: 'POST', body: JSON.stringify({ version }) }),
-  listUsers: () => request<PageData<User>>('/api/admin/users'),
+  listUsers: (query = '', page = 1, pageSize = 20) =>
+    request<PageData<User>>(`/api/admin/users?query=${encodeURIComponent(query)}&page=${page}&pageSize=${pageSize}`),
   createUser: (user: { username: string; displayName?: string; password: string; role: string; status: string }) =>
     request<User>('/api/admin/users', { method: 'POST', body: JSON.stringify(user) }),
   updateUser: (id: number, user: { displayName?: string; password?: string; role?: string; status?: string }) =>
@@ -109,7 +110,8 @@ export const api = {
   getPermissions: (id: number) => request<{ permissions: { appName: string; permission: string }[] }>(`/api/admin/users/${id}/permissions`),
   setPermissions: (id: number, permissions: { appName: string; permission: string }[]) =>
     request<null>(`/api/admin/users/${id}/permissions`, { method: 'PUT', body: JSON.stringify({ permissions }) }),
-  listAPIKeys: () => request<PageData<APIKeyItem>>('/api/admin/api-keys'),
+  listAPIKeys: (page = 1, pageSize = 20) =>
+    request<PageData<APIKeyItem>>(`/api/admin/api-keys?page=${page}&pageSize=${pageSize}`),
   createAPIKey: (body: { name: string; appNames: string[]; expiresAt?: string }) =>
     request<{ apiKey: string; item: APIKeyItem }>('/api/admin/api-keys', { method: 'POST', body: JSON.stringify(body) }),
   updateAPIKeyApps: (id: number, appNames: string[]) =>

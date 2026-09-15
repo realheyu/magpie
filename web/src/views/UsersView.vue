@@ -24,6 +24,16 @@
       </el-table-column>
     </el-table>
 
+    <div class="pagination-bar">
+      <el-pagination
+        v-model:current-page="page"
+        :page-size="pageSize"
+        :total="total"
+        layout="total, prev, pager, next"
+        @current-change="load"
+      />
+    </div>
+
     <el-dialog v-model="userDialog" :title="selectedUser ? '编辑用户' : '新建用户'" width="520px">
       <el-form :model="userForm" label-position="top">
         <el-form-item label="用户名">
@@ -86,6 +96,9 @@ import { api, type AppConfig, type User } from '@/api/client'
 
 const users = ref<User[]>([])
 const apps = ref<AppConfig[]>([])
+const page = ref(1)
+const pageSize = 20
+const total = ref(0)
 const loading = ref(false)
 const userDialog = ref(false)
 const permissionDialog = ref(false)
@@ -98,8 +111,13 @@ onMounted(load)
 async function load() {
   loading.value = true
   try {
-    const [userPage, appPage] = await Promise.all([api.listUsers(), api.listApps('', 1, 100)])
+    const [userPage, appPage] = await Promise.all([api.listUsers('', page.value, pageSize), api.listApps('', 1, 100)])
+    if (userPage.list.length === 0 && userPage.total > 0 && page.value > 1) {
+      page.value = Math.ceil(userPage.total / pageSize)
+      return load()
+    }
     users.value = userPage.list
+    total.value = userPage.total
     apps.value = appPage.list
   } finally {
     loading.value = false

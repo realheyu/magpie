@@ -118,6 +118,12 @@ body {
   border-radius: 8px;
 }
 
+.pagination-bar {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 14px;
+}
+
 .editor-form {
   padding-right: 8px;
 }
