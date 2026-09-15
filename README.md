@@ -76,7 +76,7 @@ cd web
 pnpm build
 ```
 
-Then build the single binary:
+`web/dist` 是构建产物，不入库。全新 clone 后必须先执行上面的前端构建，再编译单二进制（`go:embed` 依赖 `web/dist` 存在）：
 
 ```sh
 go build ./cmd/magpie
