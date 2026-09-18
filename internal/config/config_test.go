@@ -16,10 +16,7 @@ apiAddr = ":18081"
 ginMode = "debug"
 
 [mysql]
-addr = "mysql.local:3306"
-user = "toml-user"
-password = "toml-password"
-database = "magpie_toml"
+url = "toml-user:toml-password@tcp(mysql.local:3306)/magpie_toml?charset=utf8mb4&parseTime=True&loc=UTC"
 
 [bootstrap]
 username = "admin"
@@ -45,7 +42,7 @@ compress = true
 		t.Fatalf("write config file: %v", err)
 	}
 	t.Setenv("MAGPIE_CONFIG_FILE", path)
-	t.Setenv("MAGPIE_MYSQL_PASSWORD", "env-password")
+	t.Setenv("MAGPIE_MYSQL_URL", "env-user:env-password@tcp(env-mysql:3306)/magpie_env?charset=utf8mb4&parseTime=True&loc=UTC")
 	t.Setenv("MAGPIE_LOG_FILE_ENABLED", "false")
 	t.Setenv("MAGPIE_LOG_GIN_REQUEST", "false")
 	t.Setenv("MAGPIE_GIN_MODE", "release")
@@ -60,8 +57,8 @@ compress = true
 	if cfg.Server.GinMode != "release" {
 		t.Fatalf("gin mode env should override TOML value, got %q", cfg.Server.GinMode)
 	}
-	if cfg.MySQL.Password != "env-password" {
-		t.Fatalf("env password should override TOML password, got %q", cfg.MySQL.Password)
+	if cfg.MySQL.Url != "env-user:env-password@tcp(env-mysql:3306)/magpie_env?charset=utf8mb4&parseTime=True&loc=UTC" {
+		t.Fatalf("env url should override TOML url, got %q", cfg.MySQL.Url)
 	}
 	if cfg.Log.File.Enabled {
 		t.Fatal("env bool should override TOML bool")
@@ -72,8 +69,8 @@ compress = true
 	if cfg.Log.File.MaxBackups != 3 || cfg.Log.File.MaxAgeDays != 7 {
 		t.Fatalf("log rotate config mismatch: %+v", cfg.Log.File)
 	}
-	if !strings.Contains(cfg.MySQLDSN(), "loc=UTC") {
-		t.Fatalf("dsn should use UTC: %s", cfg.MySQLDSN())
+	if !strings.Contains(cfg.MySQL.Url, "loc=UTC") {
+		t.Fatalf("default url should use UTC loc: %s", cfg.MySQL.Url)
 	}
 }
 
@@ -83,7 +80,7 @@ func TestLoadIgnoresMissingConfigFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("missing config file should use defaults: %v", err)
 	}
-	if cfg.Server.AdminAddr != ":8080" || cfg.MySQL.Database != "magpie" {
+	if cfg.Server.AdminAddr != ":8080" || cfg.MySQL.Url != Default().MySQL.Url {
 		t.Fatalf("unexpected defaults: %+v", cfg)
 	}
 }

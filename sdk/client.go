@@ -13,8 +13,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/BurntSushi/toml"
 )
 
 const defaultTimeout = 5 * time.Second
@@ -122,28 +120,6 @@ func (c *Client) Load(ctx context.Context) (Snapshot, error) {
 		if version, err := strconv.ParseInt(resp.Header.Get("X-Magpie-Version"), 10, 64); err == nil {
 			snapshot.Version = version
 		}
-	}
-	return snapshot, nil
-}
-
-func (c *Client) LoadString(ctx context.Context) (string, error) {
-	snapshot, err := c.Load(ctx)
-	if err != nil {
-		return "", err
-	}
-	return snapshot.Content, nil
-}
-
-func (c *Client) LoadTOML(ctx context.Context, out any) (Snapshot, error) {
-	if out == nil {
-		return Snapshot{}, errors.New("out is required")
-	}
-	snapshot, err := c.Load(ctx)
-	if err != nil {
-		return Snapshot{}, err
-	}
-	if _, err := toml.Decode(snapshot.Content, out); err != nil {
-		return Snapshot{}, err
 	}
 	return snapshot, nil
 }

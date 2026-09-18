@@ -58,9 +58,9 @@ MAGPIE_API_KEY=mgp_xxx \
 go run ./examples/go-sdk
 ```
 
-## 解析 TOML
+## 解析配置内容
 
-如果应用配置是 TOML，可以直接解析到业务结构体。
+SDK 只负责拉取原始内容（`snapshot.Content`），怎么解析成结构体由业务自己决定。TOML：
 
 ```go
 type AppConfig struct {
@@ -69,12 +69,24 @@ type AppConfig struct {
 	} `toml:"server"`
 }
 
-var cfg AppConfig
-snapshot, err := client.LoadTOML(context.Background(), &cfg)
+snapshot, err := client.Load(context.Background())
 if err != nil {
 	log.Fatal(err)
 }
+var cfg AppConfig
+if _, err := toml.Decode(snapshot.Content, &cfg); err != nil { // github.com/BurntSushi/toml
+	log.Fatal(err)
+}
 fmt.Println(snapshot.Version, cfg.Server.Port)
+```
+
+JSON 用标准库即可：
+
+```go
+var cfg AppConfig
+if err := json.Unmarshal([]byte(snapshot.Content), &cfg); err != nil {
+	log.Fatal(err)
+}
 ```
 
 ## 监听变化

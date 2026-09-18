@@ -30,7 +30,7 @@ func main() {
 	zap.ReplaceGlobals(logger)
 	gin.SetMode(cfg.Server.GinMode)
 
-	db, err := store.OpenWithLogger(cfg.MySQLDSN(), logging.NewGormLogger(logger, cfg.Log.Level))
+	db, err := store.OpenWithLogger(cfg.MySQL.Url, logging.NewGormLogger(logger, cfg.Log.Level))
 	if err != nil {
 		logger.Fatal("打开数据库失败", zap.Error(err))
 	}

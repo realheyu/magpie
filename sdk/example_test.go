@@ -39,37 +39,6 @@ func ExampleClient_Load() {
 	// port = 8080
 }
 
-func ExampleClient_LoadTOML() {
-	type AppConfig struct {
-		Server struct {
-			Port int `toml:"port"`
-		} `toml:"server"`
-	}
-
-	client, err := magpiesdk.New(magpiesdk.Options{
-		Endpoint:   "http://magpie.example.com:8081",
-		AppName:    "app2-prod",
-		APIKey:     "mgp_xxx",
-		HTTPClient: exampleHTTPClient("[server]\nport = 8080\n"),
-	})
-	if err != nil {
-		panic(err)
-	}
-
-	var cfg AppConfig
-	snapshot, err := client.LoadTOML(context.Background(), &cfg)
-	if err != nil {
-		panic(err)
-	}
-
-	fmt.Println(snapshot.Version)
-	fmt.Println(cfg.Server.Port)
-
-	// Output:
-	// 7
-	// 8080
-}
-
 func exampleHTTPClient(content string) *http.Client {
 	return &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		if r.Header.Get("Authorization") != "Bearer mgp_xxx" {

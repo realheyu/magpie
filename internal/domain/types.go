@@ -67,7 +67,10 @@ func ResolveFormat(format string) (string, error) {
 var appNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,127}$`)
 
 func ValidAppName(name string) bool {
-	return appNamePattern.MatchString(name)
+	if !appNamePattern.MatchString(name) {
+		return false
+	}
+	return name != "options"
 }
 
 func ValidPermission(permission string) bool {

@@ -6,7 +6,6 @@ require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/bt-smart/btutil v1.1.8
 	github.com/gin-gonic/gin v1.11.0
-	github.com/go-sql-driver/mysql v1.9.3
 	github.com/goccy/go-yaml v1.18.0
 	go.uber.org/zap v1.28.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
@@ -24,6 +23,7 @@ require (
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/go-playground/validator/v10 v10.27.0 // indirect
+	github.com/go-sql-driver/mysql v1.9.3 // indirect
 	github.com/goccy/go-json v0.10.2 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect

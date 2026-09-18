@@ -57,34 +57,6 @@ func TestLoadSendsAPIKeyAndDoesNotCache(t *testing.T) {
 	}
 }
 
-func TestLoadTOMLDecodesContent(t *testing.T) {
-	type appConfig struct {
-		Server struct {
-			Port int `toml:"port"`
-		} `toml:"server"`
-	}
-
-	httpClient := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		return newTestResponse(http.StatusOK, nil, resultPayload[Snapshot]{
-			Code: 0,
-			Data: Snapshot{AppName: "app2-prod", Format: "toml", Content: "[server]\nport = 8080\n", Version: 1},
-		}), nil
-	})}
-	client, err := New(Options{Endpoint: "http://magpie.test", AppName: "app2-prod", APIKey: "mgp_test", HTTPClient: httpClient})
-	if err != nil {
-		t.Fatalf("new client: %v", err)
-	}
-
-	var cfg appConfig
-	snapshot, err := client.LoadTOML(context.Background(), &cfg)
-	if err != nil {
-		t.Fatalf("load toml: %v", err)
-	}
-	if snapshot.Format != "toml" || cfg.Server.Port != 8080 {
-		t.Fatalf("unexpected decoded config: snapshot=%+v cfg=%+v", snapshot, cfg)
-	}
-}
-
 func TestLoadParsesServerError(t *testing.T) {
 	httpClient := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		return newTestResponse(http.StatusForbidden, nil, resultPayload[json.RawMessage]{Code: 1, Msg: "API 密钥无权读取该应用"}), nil

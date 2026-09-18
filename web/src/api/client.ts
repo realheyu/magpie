@@ -15,7 +15,7 @@ export interface User {
   displayName: string
   role: string
   status: string
-  lastLoginAt?: string
+  lastLoginAt?: string | null
   createdAt: string
   updatedAt: string
 }
@@ -32,6 +32,15 @@ export interface AppConfig {
   permission: string
   createdAt: string
   updatedAt: string
+}
+
+export interface AppOption {
+  appName: string
+  description: string
+  format: string
+  sensitive: boolean
+  version: number
+  status: string
 }
 
 export interface Revision {
@@ -52,10 +61,21 @@ export interface APIKeyItem {
   keyPreview: string
   status: string
   appNames: string[]
-  expiresAt?: string
-  lastUsedAt?: string
+  expiresAt?: string | null
+  lastUsedAt?: string | null
   createdAt: string
   updatedAt: string
+}
+
+export interface AuditLog {
+  id: number
+  actorType: string
+  actorId?: number | null
+  action: string
+  resourceType: string
+  resourceId: string
+  metadata: string
+  createdAt: string
 }
 
 const tokenKey = 'magpieToken'
@@ -93,6 +113,8 @@ export const api = {
   me: () => request<User>('/api/admin/me'),
   listApps: (query = '', page = 1, pageSize = 20) =>
     request<PageData<AppConfig>>(`/api/admin/apps?query=${encodeURIComponent(query)}&page=${page}&pageSize=${pageSize}`),
+  listAppOptions: (query = '') => request<AppOption[]>(`/api/admin/apps/options?query=${encodeURIComponent(query)}`),
+  getApp: (appName: string) => request<AppConfig>(`/api/admin/apps/${encodeURIComponent(appName)}`),
   createApp: (app: Partial<AppConfig> & { appName: string; changeSummary?: string }) =>
     request<AppConfig>('/api/admin/apps', { method: 'POST', body: JSON.stringify(app) }),
   updateApp: (appName: string, app: Partial<AppConfig> & { changeSummary?: string }) =>
@@ -101,12 +123,15 @@ export const api = {
   revisions: (appName: string) => request<PageData<Revision>>(`/api/admin/apps/${encodeURIComponent(appName)}/revisions`),
   rollback: (appName: string, version: number) =>
     request<AppConfig>(`/api/admin/apps/${encodeURIComponent(appName)}/rollback`, { method: 'POST', body: JSON.stringify({ version }) }),
+  restoreApp: (appName: string, version?: number) =>
+    request<AppConfig>(`/api/admin/apps/${encodeURIComponent(appName)}/restore`, { method: 'POST', body: JSON.stringify({ version: version || 0 }) }),
   listUsers: (query = '', page = 1, pageSize = 20) =>
     request<PageData<User>>(`/api/admin/users?query=${encodeURIComponent(query)}&page=${page}&pageSize=${pageSize}`),
   createUser: (user: { username: string; displayName?: string; password: string; role: string; status: string }) =>
     request<User>('/api/admin/users', { method: 'POST', body: JSON.stringify(user) }),
   updateUser: (id: number, user: { displayName?: string; password?: string; role?: string; status?: string }) =>
     request<User>(`/api/admin/users/${id}`, { method: 'PUT', body: JSON.stringify(user) }),
+  deleteUser: (id: number) => request<null>(`/api/admin/users/${id}`, { method: 'DELETE' }),
   getPermissions: (id: number) => request<{ permissions: { appName: string; permission: string }[] }>(`/api/admin/users/${id}/permissions`),
   setPermissions: (id: number, permissions: { appName: string; permission: string }[]) =>
     request<null>(`/api/admin/users/${id}/permissions`, { method: 'PUT', body: JSON.stringify({ permissions }) }),
@@ -116,5 +141,9 @@ export const api = {
     request<{ apiKey: string; item: APIKeyItem }>('/api/admin/api-keys', { method: 'POST', body: JSON.stringify(body) }),
   updateAPIKeyApps: (id: number, appNames: string[]) =>
     request<null>(`/api/admin/api-keys/${id}/apps`, { method: 'PUT', body: JSON.stringify({ appNames }) }),
+  updateAPIKeyStatus: (id: number, status: string) =>
+    request<APIKeyItem>(`/api/admin/api-keys/${id}/status`, { method: 'PUT', body: JSON.stringify({ status }) }),
   deleteAPIKey: (id: number) => request<null>(`/api/admin/api-keys/${id}`, { method: 'DELETE' }),
+  listAuditLogs: (query = '', page = 1, pageSize = 20) =>
+    request<PageData<AuditLog>>(`/api/admin/audit-logs?query=${encodeURIComponent(query)}&page=${page}&pageSize=${pageSize}`),
 }

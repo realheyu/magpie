@@ -22,6 +22,10 @@
           <el-icon><Key /></el-icon>
           <span>API 密钥</span>
         </el-menu-item>
+        <el-menu-item index="/audit-logs" v-if="auth.user?.role === 'admin'">
+          <el-icon><Tickets /></el-icon>
+          <span>审计日志</span>
+        </el-menu-item>
       </el-menu>
     </el-aside>
     <el-container>
@@ -39,7 +43,7 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Document, Key, SwitchButton, User } from '@element-plus/icons-vue'
+import { Document, Key, SwitchButton, Tickets, User } from '@element-plus/icons-vue'
 import { useAuthStore } from './stores/auth'
 
 const route = useRoute()

@@ -21,13 +21,14 @@ cp config.example.toml config.toml
 
 `config.example.toml` only contains placeholder values. Keep real MySQL addresses, passwords, session secrets, and bootstrap passwords in ignored `config.toml` or environment variables.
 
-The generated MySQL DSN uses UTC:
+MySQL uses the standard one-line DSN format:
 
-```text
-parseTime=true&loc=UTC&time_zone=%27%2B00%3A00%27
+```toml
+[mysql]
+url = "magpie_user:password@tcp(127.0.0.1:3306)/magpie?charset=utf8mb4&parseTime=True&loc=UTC"
 ```
 
-Environment variables still override TOML values when present, including `MAGPIE_MYSQL_PASSWORD`, `MAGPIE_LOG_LEVEL`, and `MAGPIE_LOG_FILE_ENABLED`.
+Environment variables still override TOML values when present, including `MAGPIE_MYSQL_URL`, `MAGPIE_LOG_LEVEL`, and `MAGPIE_LOG_FILE_ENABLED`.
 
 Log configuration lives in `config.toml`:
 
@@ -122,6 +123,12 @@ curl -H 'Authorization: Bearer mgp_xxx' 'http://localhost:8081/v1/configs/app2-p
 
 The config endpoint sets `ETag` and honors `If-None-Match` with `304 Not Modified`.
 
+## Admin API Notes
+
+- `GET /api/admin/apps/options` returns all current apps with lightweight fields for admin selectors.
+- App deletion physically removes the current `apps` row and related grants, but keeps `app_revisions`; admins can restore a deleted app from a revision with `POST /api/admin/apps/{appName}/restore`.
+- Non-admin users with `full` app permission may edit config content, but app-level metadata such as `status` and `sensitive` is preserved server-side.
+
 ## Go SDK
 
 业务服务可以直接使用 Go SDK 拉取配置。SDK 默认请求 `?meta=true`，每次 `Load` 都会真实请求配置 API，不做本地缓存；返回值里会带上服务端的版本号和 `ETag`。
@@ -158,7 +165,7 @@ func main() {
 }
 ```
 
-如果业务配置是 TOML，可以直接解析到结构体：
+SDK 只返回原始配置内容和版本信息（`snapshot.Content`），解析成结构体由业务自己完成，例如 TOML 用 `github.com/BurntSushi/toml`：
 
 ```go
 type AppConfig struct {
@@ -167,9 +174,12 @@ type AppConfig struct {
 	} `toml:"server"`
 }
 
-var cfg AppConfig
-snapshot, err := client.LoadTOML(context.Background(), &cfg)
+snapshot, err := client.Load(context.Background())
 if err != nil {
+	log.Fatal(err)
+}
+var cfg AppConfig
+if _, err := toml.Decode(snapshot.Content, &cfg); err != nil {
 	log.Fatal(err)
 }
 fmt.Println(snapshot.Version, cfg.Server.Port)

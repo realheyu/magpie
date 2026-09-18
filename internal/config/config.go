@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
-	mysqldriver "github.com/go-sql-driver/mysql"
 )
 
 type Config struct {
@@ -25,11 +24,8 @@ type ServerConfig struct {
 }
 
 type MySQLConfig struct {
-	DSN      string `toml:"dsn"`
-	Addr     string `toml:"addr"`
-	User     string `toml:"user"`
-	Password string `toml:"password"`
-	Database string `toml:"database"`
+	// 标准 DSN 一行式：user:password@tcp(host:port)/dbname?charset=utf8mb4&parseTime=True&loc=UTC
+	Url string `toml:"url"`
 }
 
 type BootstrapConfig struct {
@@ -77,9 +73,7 @@ func Default() Config {
 			GinMode:   "release",
 		},
 		MySQL: MySQLConfig{
-			Addr:     "127.0.0.1:3306",
-			User:     "magpie_user",
-			Database: "magpie",
+			Url: "magpie_user:password@tcp(127.0.0.1:3306)/magpie?charset=utf8mb4&parseTime=True&loc=UTC",
 		},
 		Bootstrap: BootstrapConfig{
 			Username: "admin",
@@ -125,11 +119,7 @@ func applyEnvOverrides(cfg *Config) error {
 	cfg.Server.AdminAddr = env("MAGPIE_ADMIN_ADDR", cfg.Server.AdminAddr)
 	cfg.Server.APIAddr = env("MAGPIE_API_ADDR", cfg.Server.APIAddr)
 	cfg.Server.GinMode = env("MAGPIE_GIN_MODE", cfg.Server.GinMode)
-	cfg.MySQL.DSN = env("MAGPIE_MYSQL_DSN", cfg.MySQL.DSN)
-	cfg.MySQL.Addr = env("MAGPIE_MYSQL_ADDR", cfg.MySQL.Addr)
-	cfg.MySQL.User = env("MAGPIE_MYSQL_USER", cfg.MySQL.User)
-	cfg.MySQL.Password = env("MAGPIE_MYSQL_PASSWORD", cfg.MySQL.Password)
-	cfg.MySQL.Database = env("MAGPIE_MYSQL_DATABASE", cfg.MySQL.Database)
+	cfg.MySQL.Url = env("MAGPIE_MYSQL_URL", cfg.MySQL.Url)
 	cfg.Bootstrap.Username = env("MAGPIE_BOOTSTRAP_USERNAME", cfg.Bootstrap.Username)
 	cfg.Bootstrap.Password = env("MAGPIE_BOOTSTRAP_PASSWORD", cfg.Bootstrap.Password)
 	cfg.Log.Level = env("MAGPIE_LOG_LEVEL", cfg.Log.Level)
@@ -161,27 +151,6 @@ func applyEnvOverrides(cfg *Config) error {
 		return err
 	}
 	return nil
-}
-
-func (c Config) MySQLDSN() string {
-	if c.MySQL.DSN != "" {
-		return c.MySQL.DSN
-	}
-
-	cfg := mysqldriver.NewConfig()
-	cfg.User = c.MySQL.User
-	cfg.Passwd = c.MySQL.Password
-	cfg.Net = "tcp"
-	cfg.Addr = c.MySQL.Addr
-	cfg.DBName = c.MySQL.Database
-	cfg.ParseTime = true
-	cfg.Loc = time.UTC
-	cfg.Params = map[string]string{
-		"charset":   "utf8mb4",
-		"loc":       "UTC",
-		"time_zone": "'+00:00'",
-	}
-	return cfg.FormatDSN()
 }
 
 func (c Config) SessionTTL() time.Duration {

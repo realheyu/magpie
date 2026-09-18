@@ -38,6 +38,15 @@ type appResp struct {
 	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
+type appOptionResp struct {
+	AppName     string `json:"appName"`
+	Description string `json:"description"`
+	Format      string `json:"format"`
+	Sensitive   bool   `json:"sensitive"`
+	Version     int64  `json:"version"`
+	Status      string `json:"status"`
+}
+
 type saveAppRequest struct {
 	AppName       string `json:"appName"`
 	Description   string `json:"description"`
@@ -62,6 +71,10 @@ type revisionResp struct {
 
 type rollbackRequest struct {
 	Version int64 `json:"version" binding:"required"`
+}
+
+type restoreAppRequest struct {
+	Version int64 `json:"version"`
 }
 
 type createUserRequest struct {
@@ -117,4 +130,19 @@ type createAPIKeyResponse struct {
 
 type updateAPIKeyAppsRequest struct {
 	AppNames []string `json:"appNames" binding:"required"`
+}
+
+type updateAPIKeyStatusRequest struct {
+	Status string `json:"status" binding:"required"`
+}
+
+type auditLogResp struct {
+	ID           uint64    `json:"id"`
+	ActorType    string    `json:"actorType"`
+	ActorID      *uint64   `json:"actorId"`
+	Action       string    `json:"action"`
+	ResourceType string    `json:"resourceType"`
+	ResourceID   string    `json:"resourceId"`
+	Metadata     string    `json:"metadata"`
+	CreatedAt    time.Time `json:"createdAt"`
 }

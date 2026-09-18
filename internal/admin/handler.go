@@ -42,6 +42,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 	auth.DELETE("/apps/:appName", h.adminRequired(), h.deleteApp)
 	auth.GET("/apps/:appName/revisions", h.listRevisions)
 	auth.POST("/apps/:appName/rollback", h.rollbackApp)
+	auth.POST("/apps/:appName/restore", h.adminRequired(), h.restoreApp)
 
 	adminOnly := auth.Group("")
 	adminOnly.Use(h.adminRequired())
@@ -55,6 +56,8 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 	adminOnly.POST("/api-keys", h.createAPIKey)
 	adminOnly.DELETE("/api-keys/:id", h.deleteAPIKey)
 	adminOnly.PUT("/api-keys/:id/apps", h.updateAPIKeyApps)
+	adminOnly.PUT("/api-keys/:id/status", h.updateAPIKeyStatus)
+	adminOnly.GET("/audit-logs", h.listAuditLogs)
 }
 
 func (h *Handler) login(c *gin.Context) {
@@ -102,7 +105,12 @@ func (h *Handler) listApps(c *gin.Context) {
 	for i := range apps {
 		permission := domain.PermissionFull
 		if user.Role != domain.RoleAdmin {
-			permission, _ = h.store.GetUserAppPermission(user.ID, apps[i].ID)
+			var err error
+			permission, err = h.store.GetUserAppPermission(user.ID, apps[i].ID)
+			if err != nil || !domain.ValidPermission(permission) {
+				fail(c, http.StatusInternalServerError, "读取应用权限失败")
+				return
+			}
 		}
 		items = append(items, h.toAppResp(&apps[i], user, permission))
 	}
@@ -119,7 +127,7 @@ func (h *Handler) createApp(c *gin.Context) {
 		return
 	}
 	if !domain.ValidAppName(strings.TrimSpace(req.AppName)) {
-		fail(c, http.StatusOK, "应用名只能包含小写字母、数字、- 和 _，且以字母开头")
+		fail(c, http.StatusOK, "应用名只能包含小写字母、数字、- 和 _，且以字母开头，不能使用系统保留名称")
 		return
 	}
 	format, err := domain.ResolveFormat(req.Format)
@@ -140,6 +148,10 @@ func (h *Handler) createApp(c *gin.Context) {
 }
 
 func (h *Handler) getApp(c *gin.Context) {
+	if c.Param("appName") == "options" {
+		h.listAppOptions(c)
+		return
+	}
 	app, permission, ok := h.loadVisibleApp(c)
 	if !ok {
 		return
@@ -169,6 +181,10 @@ func (h *Handler) updateApp(c *gin.Context) {
 		fail(c, http.StatusOK, err.Error())
 		return
 	}
+	if currentUser(c).Role != domain.RoleAdmin {
+		req.Sensitive = app.Sensitive
+		req.Status = app.Status
+	}
 	updated, err := h.store.UpdateApp(app.AppName, req.Description, format, req.Content, req.Sensitive, req.Status, currentUser(c).ID, req.ChangeSummary)
 	if err != nil {
 		fail(c, http.StatusOK, err.Error())
@@ -186,21 +202,47 @@ func (h *Handler) deleteApp(c *gin.Context) {
 }
 
 func (h *Handler) listRevisions(c *gin.Context) {
-	app, permission, ok := h.loadVisibleApp(c)
-	if !ok {
+	appName := c.Param("appName")
+	app, err := h.store.GetAppByName(appName)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) && currentUser(c).Role == domain.RoleAdmin {
+			h.listRevisionPage(c, appName, false)
+			return
+		}
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			fail(c, http.StatusNotFound, "应用不存在")
+		} else {
+			fail(c, http.StatusInternalServerError, err.Error())
+		}
 		return
 	}
+	permission := domain.PermissionFull
+	if currentUser(c).Role != domain.RoleAdmin {
+		if app.Status != domain.StatusActive {
+			fail(c, http.StatusNotFound, "应用不存在")
+			return
+		}
+		var permissionErr error
+		permission, permissionErr = h.store.GetUserAppPermission(currentUser(c).ID, app.ID)
+		if permissionErr != nil || !domain.ValidPermission(permission) {
+			fail(c, http.StatusForbidden, "没有查看该应用的权限")
+			return
+		}
+	}
+	h.listRevisionPage(c, app.AppName, currentUser(c).Role != domain.RoleAdmin && permission == domain.PermissionMasked)
+}
+
+func (h *Handler) listRevisionPage(c *gin.Context, appName string, maskSensitive bool) {
 	page, pageSize := pagination(c)
-	revisions, total, err := h.store.ListAppRevisions(app.AppName, page, pageSize)
+	revisions, total, err := h.store.ListAppRevisions(appName, page, pageSize)
 	if err != nil {
 		fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 	items := make([]revisionResp, 0, len(revisions))
-	mask := currentUser(c).Role != domain.RoleAdmin && app.Sensitive && permission == domain.PermissionMasked
 	for _, revision := range revisions {
 		content := revision.Content
-		if mask {
+		if maskSensitive && revision.Sensitive {
 			content = domain.MaskContent(content)
 		}
 		items = append(items, revisionResp{ID: revision.ID, AppName: revision.AppName, Version: revision.Version, Format: revision.Format, Content: content, Sensitive: revision.Sensitive, ChangeSummary: revision.ChangeSummary, CreatedByUserID: revision.CreatedByUserID, CreatedAt: revision.CreatedAt})
@@ -221,8 +263,25 @@ func (h *Handler) rollbackApp(c *gin.Context) {
 	if !bindJSON(c, &req) {
 		return
 	}
-	app, err := h.store.RollbackApp(c.Param("appName"), req.Version, currentUser(c).ID)
+	app, err := h.store.RollbackApp(c.Param("appName"), req.Version, currentUser(c).ID, currentUser(c).Role != domain.RoleAdmin)
 	if err != nil {
+		fail(c, http.StatusOK, err.Error())
+		return
+	}
+	result.GinData(c, h.toAppResp(app, currentUser(c), domain.PermissionFull))
+}
+
+func (h *Handler) restoreApp(c *gin.Context) {
+	var req restoreAppRequest
+	if !bindJSON(c, &req) {
+		return
+	}
+	app, err := h.store.RestoreAppFromRevision(c.Param("appName"), req.Version, currentUser(c).ID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			fail(c, http.StatusNotFound, "应用版本不存在")
+			return
+		}
 		fail(c, http.StatusOK, err.Error())
 		return
 	}
@@ -248,7 +307,7 @@ func (h *Handler) createUser(c *gin.Context) {
 	if !bindJSON(c, &req) {
 		return
 	}
-	user, err := h.store.CreateUser(req.Username, req.DisplayName, req.Password, req.Role, req.Status)
+	user, err := h.store.CreateUser(req.Username, req.DisplayName, req.Password, req.Role, req.Status, currentUser(c).ID)
 	if err != nil {
 		fail(c, http.StatusOK, err.Error())
 		return
@@ -265,7 +324,7 @@ func (h *Handler) updateUser(c *gin.Context) {
 	if !bindJSON(c, &req) {
 		return
 	}
-	user, err := h.store.UpdateUser(id, req.DisplayName, req.Password, req.Role, req.Status)
+	user, err := h.store.UpdateUser(id, req.DisplayName, req.Password, req.Role, req.Status, currentUser(c).ID)
 	if err != nil {
 		fail(c, http.StatusOK, err.Error())
 		return
@@ -278,7 +337,7 @@ func (h *Handler) deleteUser(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := h.store.DeleteUser(id); err != nil {
+	if err := h.store.DeleteUser(id, currentUser(c).ID); err != nil {
 		fail(c, http.StatusOK, err.Error())
 		return
 	}
@@ -339,7 +398,12 @@ func (h *Handler) listAPIKeys(c *gin.Context) {
 	}
 	items := make([]apiKeyResp, 0, len(keys))
 	for i := range keys {
-		items = append(items, h.toAPIKeyResp(&keys[i]))
+		item, err := h.toAPIKeyResp(&keys[i])
+		if err != nil {
+			fail(c, http.StatusInternalServerError, err.Error())
+			return
+		}
+		items = append(items, item)
 	}
 	result.GinPage(c, items, total)
 }
@@ -359,7 +423,12 @@ func (h *Handler) createAPIKey(c *gin.Context) {
 		fail(c, http.StatusOK, err.Error())
 		return
 	}
-	result.GinData(c, createAPIKeyResponse{APIKey: plainKey, Item: h.toAPIKeyResp(apiKey)})
+	item, err := h.toAPIKeyResp(apiKey)
+	if err != nil {
+		fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	result.GinData(c, createAPIKeyResponse{APIKey: plainKey, Item: item})
 }
 
 func (h *Handler) deleteAPIKey(c *gin.Context) {
@@ -392,6 +461,63 @@ func (h *Handler) updateAPIKeyApps(c *gin.Context) {
 		return
 	}
 	result.GinOk(c)
+}
+
+func (h *Handler) updateAPIKeyStatus(c *gin.Context) {
+	id, ok := paramUint(c, "id")
+	if !ok {
+		return
+	}
+	var req updateAPIKeyStatusRequest
+	if !bindJSON(c, &req) {
+		return
+	}
+	apiKey, err := h.store.UpdateAPIKeyStatus(id, req.Status, currentUser(c).ID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			fail(c, http.StatusNotFound, "API 密钥不存在")
+			return
+		}
+		fail(c, http.StatusOK, err.Error())
+		return
+	}
+	item, err := h.toAPIKeyResp(apiKey)
+	if err != nil {
+		fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	result.GinData(c, item)
+}
+
+func (h *Handler) listAppOptions(c *gin.Context) {
+	if currentUser(c).Role != domain.RoleAdmin {
+		fail(c, http.StatusForbidden, "需要管理员权限")
+		return
+	}
+	apps, err := h.store.ListAppOptions(strings.TrimSpace(c.Query("query")))
+	if err != nil {
+		fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	items := make([]appOptionResp, 0, len(apps))
+	for i := range apps {
+		items = append(items, toAppOptionResp(&apps[i]))
+	}
+	result.GinData(c, items)
+}
+
+func (h *Handler) listAuditLogs(c *gin.Context) {
+	page, pageSize := pagination(c)
+	logs, total, err := h.store.ListAuditLogs(strings.TrimSpace(c.Query("query")), page, pageSize)
+	if err != nil {
+		fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	items := make([]auditLogResp, 0, len(logs))
+	for i := range logs {
+		items = append(items, toAuditLogResp(&logs[i]))
+	}
+	result.GinPage(c, items, total)
 }
 
 func (h *Handler) authRequired() gin.HandlerFunc {
@@ -439,8 +565,12 @@ func (h *Handler) loadVisibleApp(c *gin.Context) (*store.App, string, bool) {
 	if user.Role == domain.RoleAdmin {
 		return app, domain.PermissionFull, true
 	}
+	if app.Status != domain.StatusActive {
+		fail(c, http.StatusNotFound, "应用不存在")
+		return nil, "", false
+	}
 	permission, err := h.store.GetUserAppPermission(user.ID, app.ID)
-	if err != nil {
+	if err != nil || !domain.ValidPermission(permission) {
 		fail(c, http.StatusForbidden, "没有查看该应用的权限")
 		return nil, "", false
 	}
@@ -455,17 +585,28 @@ func (h *Handler) toAppResp(app *store.App, user *store.User, permission string)
 	return appResp{ID: app.ID, AppName: app.AppName, Description: app.Description, Format: app.Format, Content: content, Sensitive: app.Sensitive, Version: app.Version, Status: app.Status, Permission: permission, CreatedAt: app.CreatedAt, UpdatedAt: app.UpdatedAt}
 }
 
-func (h *Handler) toAPIKeyResp(apiKey *store.APIKey) apiKeyResp {
-	apps, _ := h.store.ListAPIKeyApps(apiKey.ID)
+func (h *Handler) toAPIKeyResp(apiKey *store.APIKey) (apiKeyResp, error) {
+	apps, err := h.store.ListAPIKeyApps(apiKey.ID)
+	if err != nil {
+		return apiKeyResp{}, err
+	}
 	appNames := make([]string, 0, len(apps))
 	for _, app := range apps {
 		appNames = append(appNames, app.AppName)
 	}
-	return apiKeyResp{ID: apiKey.ID, Name: apiKey.Name, KeyPreview: apiKey.KeyPreview, Status: apiKey.Status, AppNames: appNames, ExpiresAt: apiKey.ExpiresAt, LastUsedAt: apiKey.LastUsedAt, CreatedAt: apiKey.CreatedAt, UpdatedAt: apiKey.UpdatedAt}
+	return apiKeyResp{ID: apiKey.ID, Name: apiKey.Name, KeyPreview: apiKey.KeyPreview, Status: apiKey.Status, AppNames: appNames, ExpiresAt: apiKey.ExpiresAt, LastUsedAt: apiKey.LastUsedAt, CreatedAt: apiKey.CreatedAt, UpdatedAt: apiKey.UpdatedAt}, nil
 }
 
 func toUserResp(user *store.User) userResp {
 	return userResp{ID: user.ID, Username: user.Username, DisplayName: user.DisplayName, Role: user.Role, Status: user.Status, LastLoginAt: user.LastLoginAt, CreatedAt: user.CreatedAt, UpdatedAt: user.UpdatedAt}
+}
+
+func toAppOptionResp(app *store.App) appOptionResp {
+	return appOptionResp{AppName: app.AppName, Description: app.Description, Format: app.Format, Sensitive: app.Sensitive, Version: app.Version, Status: app.Status}
+}
+
+func toAuditLogResp(log *store.AuditLog) auditLogResp {
+	return auditLogResp{ID: log.ID, ActorType: log.ActorType, ActorID: log.ActorID, Action: log.Action, ResourceType: log.ResourceType, ResourceID: log.ResourceID, Metadata: log.Metadata, CreatedAt: log.CreatedAt}
 }
 
 func currentUser(c *gin.Context) *store.User {

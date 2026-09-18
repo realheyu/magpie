@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/BurntSushi/toml"
 	magpiesdk "github.com/realheyu/magpie/sdk"
 )
 
@@ -41,26 +42,20 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
 
-	if *decodeTOML {
-		var cfg map[string]any
-		snapshot, err := client.LoadTOML(ctx, &cfg)
-		if err != nil {
-			log.Fatalf("拉取或解析配置失败：%v", err)
-		}
-		printSnapshot(snapshot)
-		fmt.Printf("TOML 顶层 key：%s\n", strings.Join(sortedKeys(cfg), ", "))
-		if *printContent {
-			fmt.Println("\n配置内容：")
-			fmt.Println(snapshot.Content)
-		}
-		return
-	}
-
 	snapshot, err := client.Load(ctx)
 	if err != nil {
 		log.Fatalf("拉取配置失败：%v", err)
 	}
 	printSnapshot(snapshot)
+
+	if *decodeTOML && snapshot.Format == "toml" {
+		// SDK 只给原始内容，业务自己解析成结构体
+		var cfg map[string]any
+		if _, err := toml.Decode(snapshot.Content, &cfg); err != nil {
+			log.Fatalf("解析 TOML 失败：%v", err)
+		}
+		fmt.Printf("TOML 顶层 key：%s\n", strings.Join(sortedKeys(cfg), ", "))
+	}
 	if *printContent {
 		fmt.Println("\n配置内容：")
 		fmt.Println(snapshot.Content)

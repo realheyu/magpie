@@ -4,12 +4,8 @@ apiAddr = ":8081"
 ginMode = "release"
 
 [mysql]
-# dsn 优先级最高；如果设置 dsn，addr/user/password/database 会被忽略。
-dsn = ""
-addr = "127.0.0.1:3306"
-user = "magpie_user"
-password = ""
-database = "magpie"
+# 标准 DSN 一行式：用户名:密码@tcp(地址:端口)/库名?参数
+url = "magpie_user:password@tcp(127.0.0.1:3306)/magpie?charset=utf8mb4&parseTime=True&loc=UTC"
 
 [bootstrap]
 username = "admin"

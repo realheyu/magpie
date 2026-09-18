@@ -38,7 +38,7 @@ func TestValidAppName(t *testing.T) {
 			t.Fatalf("expected %q to be valid", name)
 		}
 	}
-	for _, name := range []string{"", "1app", "App", "app name", "应用", "-app", "_app", "app~name", "app/name"} {
+	for _, name := range []string{"", "1app", "App", "app name", "应用", "-app", "_app", "app~name", "app/name", "options"} {
 		if ValidAppName(name) {
 			t.Fatalf("expected %q to be invalid", name)
 		}
