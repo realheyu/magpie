@@ -545,14 +545,15 @@ func (s *Store) RestoreAppFromRevision(appName string, version int64, actorUserI
 		}
 		now := time.Now().UTC()
 		restored = App{
-			AppName:   appName,
-			Format:    revision.Format,
-			Content:   revision.Content,
-			Sensitive: revision.Sensitive,
-			Version:   maxVersion + 1,
-			Status:    domain.StatusActive,
-			CreatedAt: now,
-			UpdatedAt: now,
+			AppName:     appName,
+			Description: revision.Description,
+			Format:      revision.Format,
+			Content:     revision.Content,
+			Sensitive:   revision.Sensitive,
+			Version:     maxVersion + 1,
+			Status:      domain.StatusActive,
+			CreatedAt:   now,
+			UpdatedAt:   now,
 		}
 		if err := tx.Create(&restored).Error; err != nil {
 			return err
@@ -700,6 +701,7 @@ func createRevisionAndAudit(tx *gorm.DB, app *App, actorUserID uint64, changeSum
 		AppID:           app.ID,
 		AppName:         app.AppName,
 		Version:         app.Version,
+		Description:     app.Description,
 		Format:          app.Format,
 		Content:         app.Content,
 		Sensitive:       app.Sensitive,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"os"
 	"os/signal"
 	"syscall"
 	"time"
@@ -44,7 +45,7 @@ func main() {
 	}
 
 	sessions := security.NewSessionManager(cfg.SessionTTL())
-	adminServer := &http.Server{Addr: cfg.Server.AdminAddr, Handler: server.AdminRouter(db, sessions, cfg.Log.GinRequest)}
+	adminServer := &http.Server{Addr: cfg.Server.AdminAddr, Handler: server.AdminRouter(db, sessions, cfg.Log.GinRequest, cfg.WebBasePathSlash())}
 	apiServer := &http.Server{Addr: cfg.Server.APIAddr, Handler: server.ConfigAPIRouter(db, cfg.Log.GinRequest)}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -54,17 +55,25 @@ func main() {
 	go serve("admin", adminServer, errCh)
 	go serve("api", apiServer, errCh)
 
+	exitCode := 0
 	select {
 	case <-ctx.Done():
 		logger.Info("收到关闭信号")
 	case err := <-errCh:
 		logger.Error("服务异常停止", zap.Error(err))
+		exitCode = 1
 	}
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = adminServer.Shutdown(shutdownCtx)
 	_ = apiServer.Shutdown(shutdownCtx)
+	if exitCode != 0 {
+		// os.Exit 不执行 defer，先手动收尾再以非零码退出，让 systemd/docker 能感知启动失败
+		_ = logger.Sync()
+		_ = db.Close()
+		os.Exit(exitCode)
+	}
 }
 
 func serve(name string, srv *http.Server, errCh chan<- error) {

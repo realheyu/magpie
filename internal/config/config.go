@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -21,6 +22,9 @@ type ServerConfig struct {
 	AdminAddr string `toml:"adminAddr"`
 	APIAddr   string `toml:"apiAddr"`
 	GinMode   string `toml:"ginMode"`
+	// WebBasePath 是管理控制台的部署子路径（如 nginx 反代时的 "/magpie"），
+	// 根路径部署留空。用于向后端返回的 index.html 注入前端路由与 API 请求的基础路径。
+	WebBasePath string `toml:"webBasePath"`
 }
 
 type MySQLConfig struct {
@@ -68,8 +72,8 @@ func Load() (Config, error) {
 func Default() Config {
 	return Config{
 		Server: ServerConfig{
-			AdminAddr: ":8080",
-			APIAddr:   ":8081",
+			AdminAddr: ":6030",
+			APIAddr:   ":6031",
 			GinMode:   "release",
 		},
 		MySQL: MySQLConfig{
@@ -119,6 +123,7 @@ func applyEnvOverrides(cfg *Config) error {
 	cfg.Server.AdminAddr = env("MAGPIE_ADMIN_ADDR", cfg.Server.AdminAddr)
 	cfg.Server.APIAddr = env("MAGPIE_API_ADDR", cfg.Server.APIAddr)
 	cfg.Server.GinMode = env("MAGPIE_GIN_MODE", cfg.Server.GinMode)
+	cfg.Server.WebBasePath = env("MAGPIE_WEB_BASE_PATH", cfg.Server.WebBasePath)
 	cfg.MySQL.Url = env("MAGPIE_MYSQL_URL", cfg.MySQL.Url)
 	cfg.Bootstrap.Username = env("MAGPIE_BOOTSTRAP_USERNAME", cfg.Bootstrap.Username)
 	cfg.Bootstrap.Password = env("MAGPIE_BOOTSTRAP_PASSWORD", cfg.Bootstrap.Password)
@@ -158,6 +163,16 @@ func (c Config) SessionTTL() time.Duration {
 		return 24 * time.Hour
 	}
 	return time.Duration(c.Session.TTLHours) * time.Hour
+}
+
+// WebBasePathSlash 返回规范化的部署基础路径（带首尾斜杠）：根路径部署为 "/"，
+// 子路径部署如 "/magpie/"。非法配置按根路径处理。
+func (c Config) WebBasePathSlash() string {
+	p := strings.Trim(strings.TrimSpace(c.Server.WebBasePath), "/")
+	if p == "" {
+		return "/"
+	}
+	return "/" + p + "/"
 }
 
 func env(key, fallback string) string {

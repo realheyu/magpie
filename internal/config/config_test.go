@@ -80,7 +80,40 @@ func TestLoadIgnoresMissingConfigFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("missing config file should use defaults: %v", err)
 	}
-	if cfg.Server.AdminAddr != ":8080" || cfg.MySQL.Url != Default().MySQL.Url {
+	if cfg.Server.AdminAddr != ":6030" || cfg.MySQL.Url != Default().MySQL.Url {
 		t.Fatalf("unexpected defaults: %+v", cfg)
+	}
+}
+
+func TestWebBasePathSlash(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"", "/"},
+		{"/", "/"},
+		{"magpie", "/magpie/"},
+		{"/magpie", "/magpie/"},
+		{"/magpie/", "/magpie/"},
+		{" /a/b/ ", "/a/b/"},
+	}
+	for _, c := range cases {
+		cfg := Default()
+		cfg.Server.WebBasePath = c.in
+		if got := cfg.WebBasePathSlash(); got != c.want {
+			t.Fatalf("WebBasePathSlash(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestWebBasePathEnvOverride(t *testing.T) {
+	t.Setenv("MAGPIE_CONFIG_FILE", filepath.Join(t.TempDir(), "missing.toml"))
+	t.Setenv("MAGPIE_WEB_BASE_PATH", "/magpie")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if got := cfg.WebBasePathSlash(); got != "/magpie/" {
+		t.Fatalf("web base path env override failed, got %q", got)
 	}
 }

@@ -25,6 +25,7 @@ type AppRevision struct {
 	AppID           uint64    `gorm:"not null;index"`
 	AppName         string    `gorm:"size:128;not null;index"`
 	Version         int64     `gorm:"not null;index"`
+	Description     string    `gorm:"size:512"`
 	Format          string    `gorm:"size:32;not null"`
 	Content         string    `gorm:"type:longtext"`
 	Sensitive       bool      `gorm:"not null;default:false"`

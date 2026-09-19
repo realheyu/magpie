@@ -18,10 +18,15 @@ import (
 const defaultTimeout = 5 * time.Second
 
 type Options struct {
-	Endpoint   string
-	AppName    string
-	APIKey     string
-	Timeout    time.Duration
+	Endpoint string
+	AppName  string
+	APIKey   string
+	// Timeout 是单次 HTTP 请求的超时时间，默认 5s；含重试在内的总耗时上界约为 Timeout*(MaxRetries+1)+退避时间。
+	Timeout time.Duration
+	// MaxRetries 是请求失败后的重试次数，默认 0 不重试。
+	// 只对网络错误和 408/429/5xx 这类瞬时故障重试，401/403/404 等确定性失败会立即返回。
+	MaxRetries int
+	// HTTPClient 允许调用方复用自定义 Client（连接池、代理等）；设置后 Timeout 被忽略。
 	HTTPClient *http.Client
 }
 
@@ -30,6 +35,7 @@ type Client struct {
 	appName    string
 	apiKey     string
 	httpClient *http.Client
+	maxRetries int
 }
 
 type Snapshot struct {
@@ -80,8 +86,12 @@ func New(options Options) (*Client, error) {
 		}
 		httpClient = &http.Client{Timeout: timeout}
 	}
+	maxRetries := options.MaxRetries
+	if maxRetries < 0 {
+		maxRetries = 0
+	}
 
-	return &Client{endpoint: endpoint, appName: appName, apiKey: apiKey, httpClient: httpClient}, nil
+	return &Client{endpoint: endpoint, appName: appName, apiKey: apiKey, httpClient: httpClient, maxRetries: maxRetries}, nil
 }
 
 func (c *Client) Load(ctx context.Context) (Snapshot, error) {
@@ -89,28 +99,52 @@ func (c *Client) Load(ctx context.Context) (Snapshot, error) {
 	if err != nil {
 		return Snapshot{}, err
 	}
+	var lastErr error
+	for attempt := 0; attempt <= c.maxRetries; attempt++ {
+		if attempt > 0 {
+			if err := sleepBackoff(ctx, attempt); err != nil {
+				return Snapshot{}, err
+			}
+		}
+		snapshot, retryable, err := c.loadOnce(ctx, requestURL)
+		if err == nil {
+			return snapshot, nil
+		}
+		if ctx.Err() != nil {
+			return Snapshot{}, ctx.Err()
+		}
+		if !retryable {
+			return Snapshot{}, err
+		}
+		lastErr = err
+	}
+	return Snapshot{}, fmt.Errorf("magpie load failed after %d attempts: %w", c.maxRetries+1, lastErr)
+}
+
+// loadOnce 发起一次请求，retryable 标记网络错误和 408/429/5xx 这类值得重试的失败。
+func (c *Client) loadOnce(ctx context.Context, requestURL string) (Snapshot, bool, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
 	if err != nil {
-		return Snapshot{}, err
+		return Snapshot{}, false, err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return Snapshot{}, err
+		return Snapshot{}, true, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return Snapshot{}, parseServerError(resp)
+		return Snapshot{}, retryableStatus(resp.StatusCode), parseServerError(resp)
 	}
 
 	var payload resultPayload[Snapshot]
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return Snapshot{}, err
+		return Snapshot{}, false, err
 	}
 	if payload.Code != 0 {
-		return Snapshot{}, &ServerError{StatusCode: resp.StatusCode, Code: payload.Code, Msg: payload.Msg}
+		return Snapshot{}, false, &ServerError{StatusCode: resp.StatusCode, Code: payload.Code, Msg: payload.Msg}
 	}
 	snapshot := payload.Data
 	if snapshot.ETag == "" {
@@ -121,7 +155,34 @@ func (c *Client) Load(ctx context.Context) (Snapshot, error) {
 			snapshot.Version = version
 		}
 	}
-	return snapshot, nil
+	return snapshot, false, nil
+}
+
+// sleepBackoff 按尝试次数线性退避（200ms、400ms…封顶 1s），ctx 取消时提前返回。
+func sleepBackoff(ctx context.Context, attempt int) error {
+	delay := time.Duration(attempt) * 200 * time.Millisecond
+	if delay > time.Second {
+		delay = time.Second
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func retryableStatus(statusCode int) bool {
+	switch statusCode {
+	case http.StatusRequestTimeout, http.StatusTooManyRequests,
+		http.StatusInternalServerError, http.StatusBadGateway,
+		http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	default:
+		return false
+	}
 }
 
 func (c *Client) Watch(ctx context.Context, interval time.Duration, onChange func(Snapshot)) error {

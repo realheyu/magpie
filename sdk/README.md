@@ -30,13 +30,16 @@ func main() {
 		Endpoint: os.Getenv("MAGPIE_ENDPOINT"),
 		AppName:  os.Getenv("MAGPIE_APP_NAME"),
 		APIKey:   os.Getenv("MAGPIE_API_KEY"),
-		Timeout:  5 * time.Second,
+		Timeout:  5 * time.Second, // 单次 HTTP 请求超时，默认 5s
+		MaxRetries: 2,             // 失败后的重试次数，默认 0 不重试；只重试网络错误和 408/429/5xx
 	})
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// 注意：重试有线性退避（200ms、400ms…封顶 1s），含重试的总耗时上界约为 Timeout*(MaxRetries+1)+退避时间，
+	// 调用方的 ctx 超时要留够余量。
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	snapshot, err := client.Load(ctx)
@@ -52,7 +55,7 @@ func main() {
 运行：
 
 ```sh
-MAGPIE_ENDPOINT=http://magpie.example.com:8081 \
+MAGPIE_ENDPOINT=http://magpie.example.com:6031 \
 MAGPIE_APP_NAME=app2-prod \
 MAGPIE_API_KEY=mgp_xxx \
 go run ./examples/go-sdk

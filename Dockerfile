@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1.7
+
 ARG GO_VERSION=1.27.1
 ARG NODE_VERSION=22
 
@@ -7,7 +9,9 @@ ENV PATH=${PNPM_HOME}:${PATH}
 WORKDIR /src/web
 RUN corepack enable && corepack prepare pnpm@12.3.4 --activate
 COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./
-RUN pnpm install --frozen-lockfile
+RUN --mount=type=cache,id=magpie-pnpm,target=/pnpm/store \
+    pnpm config set store-dir /pnpm/store && \
+    pnpm install --frozen-lockfile
 
 FROM web-deps AS web-build
 COPY web/ ./
@@ -15,19 +19,20 @@ RUN pnpm build
 
 FROM golang:${GO_VERSION}-alpine AS go-deps
 WORKDIR /src
-RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.ustc.edu.cn/g' /etc/apk/repositories && \
-    apk add --no-cache ca-certificates git
+RUN apk add --no-cache ca-certificates git
 COPY go.mod go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
 
 FROM go-deps AS go-build
 COPY . ./
 COPY --from=web-build /src/web/dist ./web/dist
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/magpie ./cmd/magpie
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/magpie ./cmd/magpie
 
-FROM alpine:3.22 AS runtime
-RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.ustc.edu.cn/g' /etc/apk/repositories && \
-    apk add --no-cache ca-certificates tzdata && \
+FROM alpine:3.24 AS runtime
+RUN apk add --no-cache ca-certificates tzdata wget && \
     addgroup -S magpie && \
     adduser -S -G magpie magpie && \
     mkdir -p /app/logs /etc/magpie && \
@@ -41,5 +46,7 @@ COPY --from=go-build /out/magpie /usr/local/bin/magpie
 COPY config.example.toml /etc/magpie/config.example.toml
 
 USER magpie
-EXPOSE 8080 8081
+EXPOSE 6030 6031
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s \
+    CMD wget -qO- http://127.0.0.1:6031/healthz >/dev/null || exit 1
 ENTRYPOINT ["magpie"]

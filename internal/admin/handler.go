@@ -66,6 +66,11 @@ func (h *Handler) login(c *gin.Context) {
 		return
 	}
 	user, err := h.store.FindUserByUsername(req.Username)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		// 数据库故障不该伪装成密码错误，否则排障方向会被带偏
+		fail(c, http.StatusInternalServerError, "读取用户信息失败："+err.Error())
+		return
+	}
 	if err != nil || user.Status != domain.StatusActive || !security.VerifyPassword(req.Password, user.PasswordHash, user.PasswordSalt) {
 		fail(c, http.StatusUnauthorized, "用户名或密码错误")
 		return

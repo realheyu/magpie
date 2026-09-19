@@ -1,3 +1,5 @@
+import { withBase } from '@/utils/base'
+
 export interface Result<T> {
   code: number
   msg: string
@@ -97,7 +99,15 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
   if (!headers.has('Content-Type') && init.body) headers.set('Content-Type', 'application/json')
   const token = getToken()
   if (token) headers.set('Authorization', `Bearer ${token}`)
-  const resp = await fetch(path, { ...init, headers })
+  const resp = await fetch(withBase(path), { ...init, headers })
+  // 会话过期统一处理：清掉本地 token 并回到登录页。
+  // 登录接口自身的 401（密码错误）除外，此时已经在登录页。
+  const loginPath = withBase('/login')
+  if (resp.status === 401 && path !== '/api/admin/login' && window.location.pathname !== loginPath) {
+    clearToken()
+    window.location.href = loginPath
+    throw new Error('登录已过期，请重新登录')
+  }
   const payload = (await resp.json()) as Result<T>
   if (!resp.ok || payload.code !== 0) throw new Error(payload.msg || `请求失败：${resp.status}`)
   return payload.data
@@ -120,7 +130,8 @@ export const api = {
   updateApp: (appName: string, app: Partial<AppConfig> & { changeSummary?: string }) =>
     request<AppConfig>(`/api/admin/apps/${encodeURIComponent(appName)}`, { method: 'PUT', body: JSON.stringify(app) }),
   deleteApp: (appName: string) => request<null>(`/api/admin/apps/${encodeURIComponent(appName)}`, { method: 'DELETE' }),
-  revisions: (appName: string) => request<PageData<Revision>>(`/api/admin/apps/${encodeURIComponent(appName)}/revisions`),
+  revisions: (appName: string, page = 1, pageSize = 20) =>
+    request<PageData<Revision>>(`/api/admin/apps/${encodeURIComponent(appName)}/revisions?page=${page}&pageSize=${pageSize}`),
   rollback: (appName: string, version: number) =>
     request<AppConfig>(`/api/admin/apps/${encodeURIComponent(appName)}/rollback`, { method: 'POST', body: JSON.stringify({ version }) }),
   restoreApp: (appName: string, version?: number) =>

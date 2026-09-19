@@ -14,7 +14,7 @@ import (
 
 func ExampleClient_Load() {
 	client, err := magpiesdk.New(magpiesdk.Options{
-		Endpoint:   "http://magpie.example.com:8081",
+		Endpoint:   "http://magpie.example.com:6031",
 		AppName:    "app2-prod",
 		APIKey:     "mgp_xxx",
 		HTTPClient: exampleHTTPClient("[server]\nport = 8080\n"),

@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { BASE_PATH } from '@/utils/base'
 import AppsView from '@/views/AppsView.vue'
 import LoginView from '@/views/LoginView.vue'
 import UsersView from '@/views/UsersView.vue'
@@ -7,7 +8,7 @@ import APIKeysView from '@/views/APIKeysView.vue'
 import AuditLogsView from '@/views/AuditLogsView.vue'
 
 const router = createRouter({
-  history: createWebHistory(),
+  history: createWebHistory(BASE_PATH),
   routes: [
     { path: '/', redirect: '/apps' },
     { path: '/login', component: LoginView },

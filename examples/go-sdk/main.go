@@ -15,31 +15,34 @@ import (
 )
 
 func main() {
-	endpoint := flag.String("endpoint", env("MAGPIE_ENDPOINT", ""), "Magpie 配置 API 地址，例如 http://magpie.example.com:8081")
+	endpoint := flag.String("endpoint", env("MAGPIE_ENDPOINT", ""), "Magpie 配置 API 地址，例如 http://magpie.example.com:6031")
 	appName := flag.String("app", env("MAGPIE_APP_NAME", ""), "应用名，例如 app2-prod")
 	apiKey := flag.String("api-key", env("MAGPIE_API_KEY", ""), "API Key，也可以使用 MAGPIE_API_KEY 环境变量")
-	timeout := flag.Duration("timeout", 5*time.Second, "请求超时时间")
+	timeout := flag.Duration("timeout", 5*time.Second, "单次请求超时时间")
+	retries := flag.Int("retries", 2, "失败后的重试次数，0 表示不重试；只对网络错误和 408/429/5xx 生效")
 	decodeTOML := flag.Bool("decode-toml", true, "按 TOML 解析配置并打印顶层 key")
 	printContent := flag.Bool("print-content", false, "打印配置明文，正式环境谨慎开启")
 	flag.Parse()
 
 	if *endpoint == "" || *appName == "" || *apiKey == "" {
 		fmt.Fprintln(os.Stderr, "缺少参数：endpoint、app、api-key 都不能为空")
-		fmt.Fprintln(os.Stderr, "示例：MAGPIE_ENDPOINT=http://magpie.example.com:8081 MAGPIE_APP_NAME=app2-prod MAGPIE_API_KEY=mgp_xxx go run ./examples/go-sdk")
+		fmt.Fprintln(os.Stderr, "示例：MAGPIE_ENDPOINT=http://magpie.example.com:6031 MAGPIE_APP_NAME=app2-prod MAGPIE_API_KEY=mgp_xxx go run ./examples/go-sdk")
 		os.Exit(2)
 	}
 
 	client, err := magpiesdk.New(magpiesdk.Options{
-		Endpoint: strings.TrimRight(*endpoint, "/"),
-		AppName:  *appName,
-		APIKey:   *apiKey,
-		Timeout:  *timeout,
+		Endpoint:   strings.TrimRight(*endpoint, "/"),
+		AppName:    *appName,
+		APIKey:     *apiKey,
+		Timeout:    *timeout,
+		MaxRetries: *retries,
 	})
 	if err != nil {
 		log.Fatalf("创建 SDK 客户端失败：%v", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
+	// 重试带线性退避，ctx 超时按“单次超时×(重试次数+1)”再留些余量
+	ctx, cancel := context.WithTimeout(context.Background(), *timeout*time.Duration(*retries+1)+3*time.Second)
 	defer cancel()
 
 	snapshot, err := client.Load(ctx)

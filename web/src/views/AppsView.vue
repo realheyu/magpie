@@ -89,7 +89,7 @@
           <el-input v-model="changeSummary" :disabled="readOnly" placeholder="描述本次变更" />
         </el-form-item>
         <div class="drawer-actions">
-          <el-button @click="loadRevisions" :disabled="!editing">版本历史</el-button>
+          <el-button @click="loadRevisions(true)" :disabled="!editing">版本历史</el-button>
           <el-button type="danger" plain v-if="isAdmin && editing && !readOnly" @click="removeApp">删除</el-button>
           <el-button v-if="!readOnly" type="primary" :loading="saving" :disabled="draft.permission === 'masked'" @click="save">保存</el-button>
         </div>
@@ -110,6 +110,15 @@
           </template>
         </el-table-column>
       </el-table>
+      <div class="pagination-bar">
+        <el-pagination
+          v-model:current-page="revisionPage"
+          :page-size="revisionPageSize"
+          :total="revisionTotal"
+          layout="total, prev, pager, next"
+          @current-change="() => loadRevisions()"
+        />
+      </div>
     </el-drawer>
 
     <el-dialog v-model="revisionDetailOpen" :title="selectedRevision ? `版本 ${selectedRevision.version}` : '版本内容'" width="760px">
@@ -131,7 +140,7 @@
         <el-form-item label="应用名">
           <div class="inline-form-row">
             <el-input v-model="restoreForm.appName" placeholder="例如 app2-prod" />
-            <el-button :loading="restoreLoading" @click="loadRestoreRevisions">加载版本</el-button>
+            <el-button :loading="restoreLoading" @click="loadRestoreRevisions(true)">加载版本</el-button>
           </div>
         </el-form-item>
       </el-form>
@@ -146,6 +155,15 @@
           </template>
         </el-table-column>
       </el-table>
+      <div class="pagination-bar">
+        <el-pagination
+          v-model:current-page="restorePage"
+          :page-size="revisionPageSize"
+          :total="restoreTotal"
+          layout="total, prev, pager, next"
+          @current-change="() => loadRestoreRevisions()"
+        />
+      </div>
       <template #footer>
         <el-button @click="restoreDialog = false">关闭</el-button>
       </template>
@@ -184,6 +202,12 @@ const changeSummary = ref('')
 const draft = ref<Partial<AppConfig> | null>(null)
 const restoreForm = reactive({ appName: '' })
 const isAdmin = computed(() => auth.user?.role === 'admin')
+// 版本历史 / 恢复弹窗各自的分页状态，与应用列表的分页相互独立
+const revisionPage = ref(1)
+const revisionTotal = ref(0)
+const restorePage = ref(1)
+const restoreTotal = ref(0)
+const revisionPageSize = 20
 
 onMounted(load)
 
@@ -218,6 +242,8 @@ function openCreate() {
 function openRestore() {
   restoreForm.appName = ''
   restoreRevisions.value = []
+  restorePage.value = 1
+  restoreTotal.value = 0
   restoreDialog.value = true
 }
 
@@ -282,21 +308,29 @@ async function removeApp() {
   }
 }
 
-async function loadRevisions() {
+async function loadRevisions(reset = false) {
   if (!editing.value) return
-  const page = await api.revisions(editing.value.appName)
-  revisions.value = page.list
-  revisionOpen.value = true
+  if (reset) revisionPage.value = 1
+  try {
+    const result = await api.revisions(editing.value.appName, revisionPage.value, revisionPageSize)
+    revisions.value = result.list
+    revisionTotal.value = result.total
+    revisionOpen.value = true
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : '加载版本历史失败')
+  }
 }
 
-async function loadRestoreRevisions() {
+async function loadRestoreRevisions(reset = false) {
   const appName = restoreForm.appName.trim()
   if (!appName) return ElMessage.warning('应用名不能为空')
   restoreLoading.value = true
   try {
-    const page = await api.revisions(appName)
-    restoreRevisions.value = page.list
-    if (page.list.length === 0) ElMessage.info('没有可恢复的历史版本')
+    if (reset) restorePage.value = 1
+    const result = await api.revisions(appName, restorePage.value, revisionPageSize)
+    restoreRevisions.value = result.list
+    restoreTotal.value = result.total
+    if (result.list.length === 0) ElMessage.info('没有可恢复的历史版本')
   } catch (err) {
     ElMessage.error(err instanceof Error ? err.message : '加载历史版本失败')
   } finally {

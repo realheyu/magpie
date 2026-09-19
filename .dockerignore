@@ -11,3 +11,10 @@ coverage.out
 .pnpm-store/
 web/node_modules/
 web/dist/
+
+# Deployment helpers and documentation are not needed in the runtime image.
+deploy/
+scripts/
+README*
+LICENSE
+.zcodeignore

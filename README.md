@@ -59,8 +59,8 @@ go run ./cmd/magpie
 
 The binary starts two HTTP servers:
 
-- Admin console and admin API: `http://localhost:8080`
-- Config API: `http://localhost:8081`
+- Admin console and admin API: `http://localhost:6030`
+- Config API: `http://localhost:6031`
 
 Start the frontend dev server:
 
@@ -77,7 +77,7 @@ cd web
 pnpm build
 ```
 
-`web/dist` 是构建产物，不入库。全新 clone 后必须先执行上面的前端构建，再编译单二进制（`go:embed` 依赖 `web/dist` 存在）：
+`web/dist` 是构建产物，不入库。Docker 构建会自动生成它；如果直接在主机编译单二进制，则需要先执行前端构建：
 
 ```sh
 go build ./cmd/magpie
@@ -85,40 +85,63 @@ go build ./cmd/magpie
 
 ## Docker
 
-Dockerfile uses layered multi-stage builds: frontend dependencies, frontend build, Go dependencies, Go build, and runtime image are separated. The runtime image defaults to Shanghai timezone.
+The repository contains one deployment script. After the first manual clone, run it from the repository root. It fast-forwards the checkout from its Git upstream and builds the image from the current commit. The default target is `linux/amd64`, which also works when the script is run on an Apple Silicon Mac.
 
 ```sh
-docker build -t magpie:local .
+git clone https://github.com/realheyu/magpie.git
+cd magpie
+cp config.example.toml config.toml         # edit MySQL and bootstrap credentials
+./scripts/deploy.sh                         # updates and builds magpie:latest
+./scripts/deploy.sh --image magpie:stable  # use a different image tag
+PLATFORM=linux/arm64 ./scripts/deploy.sh
 ```
 
-The Alpine `apk` repository is switched to USTC mirror during build for domestic network stability.
+The script also creates a `magpie:git-<sha>` tag for the built commit. It refuses to update a checkout with tracked changes; the ignored `config.toml` is safe to keep on the server. Use `--no-update` when you intentionally want to build the current checkout without fetching Git.
 
-Run with a local ignored config file and writable log directory:
+Start the image with the configuration kept outside the image:
 
 ```sh
-docker run --rm \
-  -p 8080:8080 \
-  -p 8081:8081 \
+docker run -d --name magpie --restart unless-stopped \
+  -p 127.0.0.1:6030:6030 \
+  -p 127.0.0.1:6031:6031 \
   -e TZ=Asia/Shanghai \
+  -e MAGPIE_LOG_CONSOLE=true \
+  -e MAGPIE_LOG_FILE_ENABLED=false \
+  --add-host=host.docker.internal:host-gateway \
   -v "$PWD/config.toml:/etc/magpie/config.toml:ro" \
-  -v "$PWD/logs:/app/logs" \
-  magpie:local
+  magpie:latest
 ```
 
-The image includes `/etc/magpie/config.example.toml` as a sanitized template. Keep real MySQL passwords and API secrets in mounted `config.toml` or environment variables.
+Replace `magpie:latest` with the tag produced by the script when needed. The image includes `/etc/magpie/config.example.toml` as a sanitized template. Keep real MySQL passwords and API secrets in the ignored, mounted `config.toml` or environment variables. The image has a health check on port `6031`.
+
+## Reverse Proxy (nginx)
+
+The admin console (SPA + `/api/admin/*`) is served entirely by the `adminAddr` server, so nginx only needs one `proxy_pass` entry point. Ready-to-use configs live in `deploy/`:
+
+- Root path (`https://magpie.example.com/`) — see `deploy/nginx-root.conf`. No backend config required.
+- Sub path (`https://test.example.com/magpie/`) — see `deploy/nginx-subpath.conf`. Nginx strips the prefix before forwarding, and the backend injects the real base path into `index.html`.
+
+For sub-path deployment two things must agree:
+
+1. The nginx location: `location /magpie/ { proxy_pass http://127.0.0.1:6030/; }` (the trailing slash on `proxy_pass` strips the prefix).
+2. The backend config: `server.webBasePath = "/magpie"` in `config.toml` (or env `MAGPIE_WEB_BASE_PATH`). The backend replaces the `window.__MAGPIE_BASE__` placeholder in the embedded `index.html` with this value; the Vue router and API requests are prefixed with it at runtime.
+
+One frontend build works for both deployments: assets are referenced with relative paths, and the deploy prefix is injected at request time. When both front and back run behind nginx, bind the magpie ports to loopback (`adminAddr = "127.0.0.1:6030"`) so the admin server is not exposed directly.
+
+The SDK API (`:6031`) is independent of the console path; SDK clients should point at `http://host:6031` directly. Do not expect `https://test.example.com/magpie/v1/...` to work through the console location — it forwards to the admin port, which has no `/v1` routes; proxying the SDK through nginx needs its own location block (see the commented example in `deploy/nginx-subpath.conf`).
 
 ## Config API
 
 Read the full config content for an app:
 
 ```sh
-curl -H 'Authorization: Bearer mgp_xxx' http://localhost:8081/v1/configs/app2-prod
+curl -H 'Authorization: Bearer mgp_xxx' http://localhost:6031/v1/configs/app2-prod
 ```
 
 Read metadata-wrapped JSON:
 
 ```sh
-curl -H 'Authorization: Bearer mgp_xxx' 'http://localhost:8081/v1/configs/app2-prod?meta=true'
+curl -H 'Authorization: Bearer mgp_xxx' 'http://localhost:6031/v1/configs/app2-prod?meta=true'
 ```
 
 The config endpoint sets `ETag` and honors `If-None-Match` with `304 Not Modified`.
@@ -149,7 +172,7 @@ import (
 
 func main() {
 	client, err := magpiesdk.New(magpiesdk.Options{
-		Endpoint: "http://localhost:8081",
+		Endpoint: "http://localhost:6031",
 		AppName:  "app2-prod",
 		APIKey:   "mgp_xxx",
 	})
@@ -196,7 +219,7 @@ err := client.Watch(context.Background(), 30*time.Second, func(snapshot magpiesd
 仓库里也提供了一个可直接运行的示例程序：
 
 ```sh
-MAGPIE_ENDPOINT=http://magpie.example.com:8081 \
+MAGPIE_ENDPOINT=http://magpie.example.com:6031 \
 MAGPIE_APP_NAME=app2-prod \
 MAGPIE_API_KEY=mgp_xxx \
 go run ./examples/go-sdk
@@ -212,7 +235,7 @@ go run ./examples/go-sdk -print-content
 
 ```sh
 go run ./examples/go-sdk \
-  -endpoint http://magpie.example.com:8081 \
+  -endpoint http://magpie.example.com:6031 \
   -app app2-prod \
   -api-key mgp_xxx
 ```

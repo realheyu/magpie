@@ -19,7 +19,26 @@ type SessionManager struct {
 }
 
 func NewSessionManager(ttl time.Duration) *SessionManager {
-	return &SessionManager{ttl: ttl, sessions: make(map[string]Session)}
+	m := &SessionManager{ttl: ttl, sessions: make(map[string]Session)}
+	go m.cleanupLoop(24 * time.Hour)
+	return m
+}
+
+// cleanupLoop 每天清一次过期会话。Validate 只会在 token 再次被访问时清理，
+// 被遗弃的 token 需要靠这里回收，否则长期运行会缓慢累积。
+func (m *SessionManager) cleanupLoop(interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for range ticker.C {
+		now := time.Now().UTC()
+		m.mu.Lock()
+		for token, session := range m.sessions {
+			if now.After(session.ExpiresAt) {
+				delete(m.sessions, token)
+			}
+		}
+		m.mu.Unlock()
+	}
 }
 
 func (m *SessionManager) Create(userID uint64) (string, time.Time, error) {
