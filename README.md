@@ -19,7 +19,7 @@ Copy `config.example.toml` to `config.toml` and set local secrets there. `config
 cp config.example.toml config.toml
 ```
 
-`config.example.toml` only contains placeholder values. Keep real MySQL addresses, passwords, session secrets, and bootstrap passwords in ignored `config.toml` or environment variables.
+`config.example.toml` only contains placeholder values. Keep real MySQL addresses, passwords, session secrets, and bootstrap passwords in the ignored `config.toml`.
 
 MySQL uses the standard one-line DSN format:
 
@@ -27,8 +27,6 @@ MySQL uses the standard one-line DSN format:
 [mysql]
 url = "magpie_user:password@tcp(127.0.0.1:3306)/magpie?charset=utf8mb4&parseTime=True&loc=UTC"
 ```
-
-Environment variables still override TOML values when present, including `MAGPIE_MYSQL_URL`, `MAGPIE_LOG_LEVEL`, and `MAGPIE_LOG_FILE_ENABLED`.
 
 Log configuration lives in `config.toml`:
 
@@ -105,14 +103,12 @@ docker run -d --name magpie --restart unless-stopped \
   -p 127.0.0.1:6030:6030 \
   -p 127.0.0.1:6031:6031 \
   -e TZ=Asia/Shanghai \
-  -e MAGPIE_LOG_CONSOLE=true \
-  -e MAGPIE_LOG_FILE_ENABLED=false \
   --add-host=host.docker.internal:host-gateway \
   -v "$PWD/config.toml:/etc/magpie/config.toml:ro" \
   magpie:latest
 ```
 
-Replace `magpie:latest` with the tag produced by the script when needed. The image includes `/etc/magpie/config.example.toml` as a sanitized template. Keep real MySQL passwords and API secrets in the ignored, mounted `config.toml` or environment variables. The image has a health check on port `6031`.
+Replace `magpie:latest` with the tag produced by the script when needed. The image includes `/etc/magpie/config.example.toml` as a sanitized template. Keep real MySQL passwords and API secrets in the ignored, mounted `config.toml`. The image has a health check on port `6031`.
 
 ## Reverse Proxy (nginx)
 
@@ -124,7 +120,7 @@ The admin console (SPA + `/api/admin/*`) is served entirely by the `adminAddr` s
 For sub-path deployment two things must agree:
 
 1. The nginx location: `location /magpie/ { proxy_pass http://127.0.0.1:6030/; }` (the trailing slash on `proxy_pass` strips the prefix).
-2. The backend config: `server.webBasePath = "/magpie"` in `config.toml` (or env `MAGPIE_WEB_BASE_PATH`). The backend replaces the `window.__MAGPIE_BASE__` placeholder in the embedded `index.html` with this value; the Vue router and API requests are prefixed with it at runtime.
+2. The backend config: `server.webBasePath = "/magpie"` in `config.toml`. The backend replaces the `window.__MAGPIE_BASE__` placeholder in the embedded `index.html` with this value; the Vue router and API requests are prefixed with it at runtime.
 
 One frontend build works for both deployments: assets are referenced with relative paths, and the deploy prefix is injected at request time. When both front and back run behind nginx, bind the magpie ports to loopback (`adminAddr = "127.0.0.1:6030"`) so the admin server is not exposed directly.
 

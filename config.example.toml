@@ -3,7 +3,7 @@ adminAddr = ":6030"
 apiAddr = ":6031"
 ginMode = "release"
 # 管理控制台的部署子路径，nginx 反代到子路径（如 https://host/magpie/）时设置为 "/magpie"，
-# 需与 nginx location 保持一致；根路径部署（https://host/）留空。也可用环境变量 MAGPIE_WEB_BASE_PATH 覆盖
+# 需与 nginx location 保持一致；根路径部署（https://host/）留空。
 webBasePath = ""
 
 [mysql]

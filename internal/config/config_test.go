@@ -3,17 +3,18 @@ package config
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
+	"time"
 )
 
-func TestLoadTOMLAndEnvOverride(t *testing.T) {
+func TestLoadTOML(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
 	content := `
 [server]
 adminAddr = ":18080"
 apiAddr = ":18081"
 ginMode = "debug"
+webBasePath = "/magpie"
 
 [mysql]
 url = "toml-user:toml-password@tcp(mysql.local:3306)/magpie_toml?charset=utf8mb4&parseTime=True&loc=UTC"
@@ -42,35 +43,31 @@ compress = true
 		t.Fatalf("write config file: %v", err)
 	}
 	t.Setenv("MAGPIE_CONFIG_FILE", path)
-	t.Setenv("MAGPIE_MYSQL_URL", "env-user:env-password@tcp(env-mysql:3306)/magpie_env?charset=utf8mb4&parseTime=True&loc=UTC")
-	t.Setenv("MAGPIE_LOG_FILE_ENABLED", "false")
-	t.Setenv("MAGPIE_LOG_GIN_REQUEST", "false")
-	t.Setenv("MAGPIE_GIN_MODE", "release")
 
 	cfg, err := Load()
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
-	if cfg.Server.AdminAddr != ":18080" {
-		t.Fatalf("admin addr mismatch: %q", cfg.Server.AdminAddr)
+	if cfg.Server.AdminAddr != ":18080" || cfg.Server.APIAddr != ":18081" {
+		t.Fatalf("server addr mismatch: %+v", cfg.Server)
 	}
-	if cfg.Server.GinMode != "release" {
-		t.Fatalf("gin mode env should override TOML value, got %q", cfg.Server.GinMode)
+	if cfg.Server.GinMode != "debug" {
+		t.Fatalf("gin mode mismatch: %q", cfg.Server.GinMode)
 	}
-	if cfg.MySQL.Url != "env-user:env-password@tcp(env-mysql:3306)/magpie_env?charset=utf8mb4&parseTime=True&loc=UTC" {
-		t.Fatalf("env url should override TOML url, got %q", cfg.MySQL.Url)
+	if got := cfg.WebBasePathSlash(); got != "/magpie/" {
+		t.Fatalf("web base path mismatch: %q", got)
 	}
-	if cfg.Log.File.Enabled {
-		t.Fatal("env bool should override TOML bool")
+	if cfg.MySQL.Url != "toml-user:toml-password@tcp(mysql.local:3306)/magpie_toml?charset=utf8mb4&parseTime=True&loc=UTC" {
+		t.Fatalf("mysql url mismatch: %q", cfg.MySQL.Url)
 	}
-	if cfg.Log.GinRequest {
-		t.Fatal("gin request log env bool should override TOML bool")
+	if cfg.Session.TTLHours != 12 || cfg.SessionTTL() != 12*time.Hour {
+		t.Fatalf("session ttl mismatch: %+v", cfg.Session)
 	}
-	if cfg.Log.File.MaxBackups != 3 || cfg.Log.File.MaxAgeDays != 7 {
+	if !cfg.Log.GinRequest || cfg.Log.Console {
+		t.Fatalf("log flags mismatch: %+v", cfg.Log)
+	}
+	if cfg.Log.File.MaxBackups != 3 || cfg.Log.File.MaxAgeDays != 7 || cfg.Log.File.MaxSizeMB != 12 {
 		t.Fatalf("log rotate config mismatch: %+v", cfg.Log.File)
-	}
-	if !strings.Contains(cfg.MySQL.Url, "loc=UTC") {
-		t.Fatalf("default url should use UTC loc: %s", cfg.MySQL.Url)
 	}
 }
 
@@ -103,17 +100,5 @@ func TestWebBasePathSlash(t *testing.T) {
 		if got := cfg.WebBasePathSlash(); got != c.want {
 			t.Fatalf("WebBasePathSlash(%q) = %q, want %q", c.in, got, c.want)
 		}
-	}
-}
-
-func TestWebBasePathEnvOverride(t *testing.T) {
-	t.Setenv("MAGPIE_CONFIG_FILE", filepath.Join(t.TempDir(), "missing.toml"))
-	t.Setenv("MAGPIE_WEB_BASE_PATH", "/magpie")
-	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("load config: %v", err)
-	}
-	if got := cfg.WebBasePathSlash(); got != "/magpie/" {
-		t.Fatalf("web base path env override failed, got %q", got)
 	}
 }

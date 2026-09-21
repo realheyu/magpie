@@ -3,7 +3,6 @@ package config
 import (
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -57,13 +56,15 @@ type LogFileConfig struct {
 	Compress   bool   `toml:"compress"`
 }
 
+// Load 读取配置文件（路径取自 MAGPIE_CONFIG_FILE 环境变量，默认 config.toml），
+// 文件不存在时使用 Default 提供的默认值。
 func Load() (Config, error) {
-	cfg := Default()
-	path := env("MAGPIE_CONFIG_FILE", "config.toml")
-	if err := loadTOML(path, &cfg); err != nil {
-		return Config{}, err
+	path := os.Getenv("MAGPIE_CONFIG_FILE")
+	if path == "" {
+		path = "config.toml"
 	}
-	if err := applyEnvOverrides(&cfg); err != nil {
+	cfg := Default()
+	if err := loadTOML(path, &cfg); err != nil {
 		return Config{}, err
 	}
 	return cfg, nil
@@ -103,9 +104,6 @@ func Default() Config {
 }
 
 func loadTOML(path string, cfg *Config) error {
-	if path == "" {
-		return nil
-	}
 	if _, err := os.Stat(path); err != nil {
 		if os.IsNotExist(err) {
 			return nil
@@ -115,45 +113,6 @@ func loadTOML(path string, cfg *Config) error {
 	_, err := toml.DecodeFile(path, cfg)
 	if err != nil {
 		return fmt.Errorf("解析 TOML 配置文件失败：%w", err)
-	}
-	return nil
-}
-
-func applyEnvOverrides(cfg *Config) error {
-	cfg.Server.AdminAddr = env("MAGPIE_ADMIN_ADDR", cfg.Server.AdminAddr)
-	cfg.Server.APIAddr = env("MAGPIE_API_ADDR", cfg.Server.APIAddr)
-	cfg.Server.GinMode = env("MAGPIE_GIN_MODE", cfg.Server.GinMode)
-	cfg.Server.WebBasePath = env("MAGPIE_WEB_BASE_PATH", cfg.Server.WebBasePath)
-	cfg.MySQL.Url = env("MAGPIE_MYSQL_URL", cfg.MySQL.Url)
-	cfg.Bootstrap.Username = env("MAGPIE_BOOTSTRAP_USERNAME", cfg.Bootstrap.Username)
-	cfg.Bootstrap.Password = env("MAGPIE_BOOTSTRAP_PASSWORD", cfg.Bootstrap.Password)
-	cfg.Log.Level = env("MAGPIE_LOG_LEVEL", cfg.Log.Level)
-	cfg.Log.File.Filename = env("MAGPIE_LOG_FILE_FILENAME", cfg.Log.File.Filename)
-
-	var err error
-	if cfg.Session.TTLHours, err = envInt("MAGPIE_SESSION_TTL_HOURS", cfg.Session.TTLHours); err != nil {
-		return err
-	}
-	if cfg.Log.Console, err = envBool("MAGPIE_LOG_CONSOLE", cfg.Log.Console); err != nil {
-		return err
-	}
-	if cfg.Log.GinRequest, err = envBool("MAGPIE_LOG_GIN_REQUEST", cfg.Log.GinRequest); err != nil {
-		return err
-	}
-	if cfg.Log.File.Enabled, err = envBool("MAGPIE_LOG_FILE_ENABLED", cfg.Log.File.Enabled); err != nil {
-		return err
-	}
-	if cfg.Log.File.MaxSizeMB, err = envInt("MAGPIE_LOG_FILE_MAX_SIZE_MB", cfg.Log.File.MaxSizeMB); err != nil {
-		return err
-	}
-	if cfg.Log.File.MaxBackups, err = envInt("MAGPIE_LOG_FILE_MAX_BACKUPS", cfg.Log.File.MaxBackups); err != nil {
-		return err
-	}
-	if cfg.Log.File.MaxAgeDays, err = envInt("MAGPIE_LOG_FILE_MAX_AGE_DAYS", cfg.Log.File.MaxAgeDays); err != nil {
-		return err
-	}
-	if cfg.Log.File.Compress, err = envBool("MAGPIE_LOG_FILE_COMPRESS", cfg.Log.File.Compress); err != nil {
-		return err
 	}
 	return nil
 }
@@ -173,35 +132,4 @@ func (c Config) WebBasePathSlash() string {
 		return "/"
 	}
 	return "/" + p + "/"
-}
-
-func env(key, fallback string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return fallback
-}
-
-func envInt(key string, fallback int) (int, error) {
-	value := os.Getenv(key)
-	if value == "" {
-		return fallback, nil
-	}
-	n, err := strconv.Atoi(value)
-	if err != nil {
-		return 0, fmt.Errorf("%s 必须是整数：%w", key, err)
-	}
-	return n, nil
-}
-
-func envBool(key string, fallback bool) (bool, error) {
-	value := os.Getenv(key)
-	if value == "" {
-		return fallback, nil
-	}
-	b, err := strconv.ParseBool(value)
-	if err != nil {
-		return false, fmt.Errorf("%s 必须是布尔值：%w", key, err)
-	}
-	return b, nil
 }
