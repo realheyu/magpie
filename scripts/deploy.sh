@@ -2,31 +2,31 @@
 # 更新当前仓库并构建 Magpie 镜像。
 #
 # 第一次部署请先手动 clone 仓库，然后在仓库根目录执行：
-#   ./scripts/deploy.sh
+#   ./scripts/deploy.sh v1.0.0
 #
 # 可选参数：
-#   ./scripts/deploy.sh --image registry.example.com/magpie:latest
-#   ./scripts/deploy.sh --platform linux/arm64
-#   ./scripts/deploy.sh --branch main --remote origin
-#   ./scripts/deploy.sh --no-update       # 只构建当前 checkout
+#   ./scripts/deploy.sh v1.0.0 --image registry.example.com/magpie
+#   ./scripts/deploy.sh v1.0.0 --platform linux/arm64
+#   ./scripts/deploy.sh v1.0.0 --branch main --remote origin
+#   ./scripts/deploy.sh v1.0.0 --no-update       # 只构建当前 checkout
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REMOTE="${REMOTE:-}"
 BRANCH="${BRANCH:-}"
-IMAGE="${IMAGE:-magpie:latest}"
+IMAGE_REPOSITORY="${IMAGE_REPOSITORY:-magpie}"
 PLATFORM="${PLATFORM:-linux/amd64}"
 UPDATE=1
 
 usage() {
   cat <<'EOF'
-用法：scripts/deploy.sh [选项]
+用法：scripts/deploy.sh <版本号> [选项]
 
-更新仓库后构建镜像。默认镜像为 magpie:latest，构建后会额外生成
-magpie:git-<commit> 标签，方便确认版本和回滚。
+更新仓库后构建指定版本的镜像。镜像默认为 magpie:<版本号>，构建后会额外生成
+magpie:<版本号>-git-<commit> 标签，方便确认版本和回滚。
 
 选项：
-  --image IMAGE       镜像名称和标签（也可用 IMAGE 环境变量）
+  --image REPOSITORY  镜像仓库名称（默认 magpie）
   --platform PLATFORM Docker 目标平台（默认 linux/amd64）
   --remote NAME       Git 远程仓库（默认使用当前分支 upstream，否则 origin）
   --branch NAME       要更新的分支（默认当前分支）
@@ -34,9 +34,9 @@ magpie:git-<commit> 标签，方便确认版本和回滚。
   -h, --help          显示帮助
 
 示例：
-  scripts/deploy.sh
-  scripts/deploy.sh --image registry.example.com/magpie:latest
-  PLATFORM=linux/arm64 scripts/deploy.sh
+  scripts/deploy.sh v1.0.0
+  scripts/deploy.sh 20260921 --image registry.example.com/magpie
+  PLATFORM=linux/arm64 scripts/deploy.sh v1.0.0
 EOF
 }
 
@@ -45,11 +45,25 @@ die() {
   exit 1
 }
 
+if [[ $# -eq 1 && ("$1" == "-h" || "$1" == "--help") ]]; then
+  usage
+  exit 0
+fi
+
+[[ $# -ge 1 ]] || die "必须传版本号，例如：scripts/deploy.sh v1.0.0"
+VERSION="$1"
+shift
+[[ "$VERSION" != -* ]] || die "版本号必须作为第一个参数传入，例如：scripts/deploy.sh v1.0.0"
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
     --image)
       [[ $# -ge 2 ]] || die "--image 需要参数"
-      IMAGE="$2"
+      IMAGE_REPOSITORY="$2"
       shift 2
       ;;
     --platform)
@@ -71,15 +85,17 @@ while [[ $# -gt 0 ]]; do
       UPDATE=0
       shift
       ;;
-    -h|--help)
-      usage
-      exit 0
+    -*)
+      die "未知参数：$1（使用 --help 查看用法）"
       ;;
     *)
-      die "未知参数：$1（使用 --help 查看用法）"
+      die "只能传一个版本号：$VERSION"
       ;;
   esac
 done
+
+[[ "$VERSION" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]] || \
+  die "版本号不符合 Docker 标签格式：$VERSION"
 
 command -v git >/dev/null 2>&1 || die "未找到 git"
 command -v docker >/dev/null 2>&1 || die "未找到 docker"
@@ -113,12 +129,8 @@ else
 fi
 
 COMMIT="$(git rev-parse --short HEAD)"
-[[ "$IMAGE" != *@* ]] || die "镜像参数不能使用 digest：$IMAGE"
-IMAGE_REPOSITORY="$IMAGE"
-if [[ "${IMAGE##*/}" == *:* ]]; then
-  IMAGE_REPOSITORY="${IMAGE%:*}"
-fi
-GIT_IMAGE="${IMAGE_REPOSITORY}:git-${COMMIT}"
+IMAGE="${IMAGE_REPOSITORY}:${VERSION}"
+GIT_IMAGE="${IMAGE_REPOSITORY}:${VERSION}-git-${COMMIT}"
 
 echo "==> 构建镜像：${IMAGE}（${PLATFORM}，commit ${COMMIT}）"
 docker build --pull --platform "$PLATFORM" -t "$IMAGE" .

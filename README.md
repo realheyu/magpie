@@ -89,12 +89,12 @@ The repository contains one deployment script. After the first manual clone, run
 git clone https://github.com/realheyu/magpie.git
 cd magpie
 cp config.example.toml config.toml         # edit MySQL and bootstrap credentials
-./scripts/deploy.sh                         # updates and builds magpie:latest
-./scripts/deploy.sh --image magpie:stable  # use a different image tag
-PLATFORM=linux/arm64 ./scripts/deploy.sh
+./scripts/deploy.sh v1.0.0                  # updates and builds magpie:v1.0.0
+./scripts/deploy.sh 20260921                # date-style version is also supported
+PLATFORM=linux/arm64 ./scripts/deploy.sh v1.0.0
 ```
 
-The script also creates a `magpie:git-<sha>` tag for the built commit. It refuses to update a checkout with tracked changes; the ignored `config.toml` is safe to keep on the server. Use `--no-update` when you intentionally want to build the current checkout without fetching Git.
+The version argument is required and becomes the Docker tag. The script also creates a `magpie:<version>-git-<sha>` tag for the built commit. Use `--image registry.example.com/magpie` to change the image repository. It refuses to update a checkout with tracked changes; the ignored `config.toml` is safe to keep on the server. Use `--no-update` when you intentionally want to build the current checkout without fetching Git.
 
 Start the image with the configuration kept outside the image:
 
@@ -105,10 +105,10 @@ docker run -d --name magpie --restart unless-stopped \
   -e TZ=Asia/Shanghai \
   --add-host=host.docker.internal:host-gateway \
   -v "$PWD/config.toml:/etc/magpie/config.toml:ro" \
-  magpie:latest
+  magpie:v1.0.0
 ```
 
-Replace `magpie:latest` with the tag produced by the script when needed. The image includes `/etc/magpie/config.example.toml` as a sanitized template. Keep real MySQL passwords and API secrets in the ignored, mounted `config.toml`. The image has a health check on port `6031`.
+Replace `magpie:v1.0.0` with the version you built. The image includes `/etc/magpie/config.example.toml` as a sanitized template. Keep real MySQL passwords and API secrets in the ignored, mounted `config.toml`. The image has a health check on port `6031`.
 
 ## Reverse Proxy (nginx)
 
