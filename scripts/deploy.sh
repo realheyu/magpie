@@ -9,6 +9,7 @@
 #   ./scripts/deploy.sh v1.0.0 --platform linux/arm64
 #   ./scripts/deploy.sh v1.0.0 --branch main --remote origin
 #   ./scripts/deploy.sh v1.0.0 --no-update       # 只构建当前 checkout
+#   ./scripts/deploy.sh --update-only             # 只更新当前 checkout
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -17,13 +18,14 @@ BRANCH="${BRANCH:-}"
 IMAGE_REPOSITORY="${IMAGE_REPOSITORY:-magpie}"
 PLATFORM="${PLATFORM:-linux/amd64}"
 UPDATE=1
+UPDATE_ONLY=0
 
 usage() {
   cat <<'EOF'
 用法：scripts/deploy.sh <版本号> [选项]
+      scripts/deploy.sh --update-only [选项]
 
-更新仓库后构建指定版本的镜像。镜像默认为 magpie:<版本号>，构建后会额外生成
-magpie:<版本号>-git-<commit> 标签，方便确认版本和回滚。
+更新仓库后构建指定版本的镜像。镜像默认为 magpie:<版本号>。
 
 选项：
   --image REPOSITORY  镜像仓库名称（默认 magpie）
@@ -31,12 +33,14 @@ magpie:<版本号>-git-<commit> 标签，方便确认版本和回滚。
   --remote NAME       Git 远程仓库（默认使用当前分支 upstream，否则 origin）
   --branch NAME       要更新的分支（默认当前分支）
   --no-update         跳过 git 更新，只构建当前代码
+  --update-only       只更新 git 仓库，不构建镜像
   -h, --help          显示帮助
 
 示例：
   scripts/deploy.sh v1.0.0
   scripts/deploy.sh 20260921 --image registry.example.com/magpie
   PLATFORM=linux/arm64 scripts/deploy.sh v1.0.0
+  scripts/deploy.sh --update-only
 EOF
 }
 
@@ -50,10 +54,7 @@ if [[ $# -eq 1 && ("$1" == "-h" || "$1" == "--help") ]]; then
   exit 0
 fi
 
-[[ $# -ge 1 ]] || die "必须传版本号，例如：scripts/deploy.sh v1.0.0"
-VERSION="$1"
-shift
-[[ "$VERSION" != -* ]] || die "版本号必须作为第一个参数传入，例如：scripts/deploy.sh v1.0.0"
+VERSION=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -82,23 +83,38 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --no-update)
+      [[ "$UPDATE_ONLY" -eq 0 ]] || die "--no-update 与 --update-only 不能同时使用"
       UPDATE=0
+      shift
+      ;;
+    --update-only)
+      [[ "$UPDATE" -eq 1 ]] || die "--no-update 与 --update-only 不能同时使用"
+      UPDATE_ONLY=1
       shift
       ;;
     -*)
       die "未知参数：$1（使用 --help 查看用法）"
       ;;
     *)
-      die "只能传一个版本号：$VERSION"
+      [[ -z "$VERSION" ]] || die "只能传一个版本号：$VERSION"
+      VERSION="$1"
+      shift
       ;;
   esac
 done
 
-[[ "$VERSION" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]] || \
-  die "版本号不符合 Docker 标签格式：$VERSION"
+if [[ -z "$VERSION" && "$UPDATE_ONLY" -eq 0 ]]; then
+  die "必须传版本号，例如：scripts/deploy.sh v1.0.0"
+fi
+if [[ -n "$VERSION" ]]; then
+  [[ "$VERSION" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]] || \
+    die "版本号不符合 Docker 标签格式：$VERSION"
+fi
 
 command -v git >/dev/null 2>&1 || die "未找到 git"
-command -v docker >/dev/null 2>&1 || die "未找到 docker"
+if [[ "$UPDATE_ONLY" -eq 0 ]]; then
+  command -v docker >/dev/null 2>&1 || die "未找到 docker"
+fi
 git -C "$ROOT" rev-parse --show-toplevel >/dev/null 2>&1 || die "脚本必须位于 Git 仓库中"
 
 cd "$ROOT"
@@ -128,14 +144,15 @@ else
   echo "==> 跳过仓库更新"
 fi
 
-COMMIT="$(git rev-parse --short HEAD)"
-IMAGE="${IMAGE_REPOSITORY}:${VERSION}"
-GIT_IMAGE="${IMAGE_REPOSITORY}:${VERSION}-git-${COMMIT}"
+if [[ "$UPDATE_ONLY" -eq 1 ]]; then
+  echo "==> 仓库更新完成"
+  exit 0
+fi
 
-echo "==> 构建镜像：${IMAGE}（${PLATFORM}，commit ${COMMIT}）"
+IMAGE="${IMAGE_REPOSITORY}:${VERSION}"
+
+echo "==> 构建镜像：${IMAGE}（${PLATFORM}）"
 docker build --pull --platform "$PLATFORM" -t "$IMAGE" .
-docker tag "$IMAGE" "$GIT_IMAGE"
 
 echo "==> 构建完成"
 echo "    image:  $IMAGE"
-echo "    commit: $GIT_IMAGE"

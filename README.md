@@ -83,7 +83,7 @@ go build ./cmd/magpie
 
 ## Docker
 
-The repository contains one deployment script. After the first manual clone, run it from the repository root. It fast-forwards the checkout from its Git upstream and builds the image from the current commit. The default target is `linux/amd64`, which also works when the script is run on an Apple Silicon Mac.
+The repository contains deployment scripts. After the first manual clone, run them from the repository root. The deploy script fast-forwards the checkout from its Git upstream and builds the image from the current commit. The default target is `linux/amd64`, which also works when the script is run on an Apple Silicon Mac.
 
 ```sh
 git clone https://github.com/realheyu/magpie.git
@@ -92,23 +92,18 @@ cp config.example.toml config.toml         # edit MySQL and bootstrap credential
 ./scripts/deploy.sh v1.0.0                  # updates and builds magpie:v1.0.0
 ./scripts/deploy.sh 20260921                # date-style version is also supported
 PLATFORM=linux/arm64 ./scripts/deploy.sh v1.0.0
+./scripts/deploy.sh --update-only         # 只更新仓库，不构建镜像
 ```
 
-The version argument is required and becomes the Docker tag. The script also creates a `magpie:<version>-git-<sha>` tag for the built commit. Use `--image registry.example.com/magpie` to change the image repository. It refuses to update a checkout with tracked changes; the ignored `config.toml` is safe to keep on the server. Use `--no-update` when you intentionally want to build the current checkout without fetching Git.
+The version argument is required for a build and becomes the only Docker tag produced by it. Use `--update-only` to fetch and fast-forward the current checkout without building an image. Use `--image registry.example.com/magpie` to change the image repository. The script refuses to update a checkout with tracked changes; the ignored `config.toml` is safe to keep on the server. Use `--no-update` when you intentionally want to build the current checkout without fetching Git.
 
 Start the image with the configuration kept outside the image:
 
 ```sh
-docker run -d --name magpie --restart unless-stopped \
-  -p 127.0.0.1:6030:6030 \
-  -p 127.0.0.1:6031:6031 \
-  -e TZ=Asia/Shanghai \
-  --add-host=host.docker.internal:host-gateway \
-  -v "$PWD/config.toml:/etc/magpie/config.toml:ro" \
-  magpie:v1.0.0
+./scripts/run.sh v1.0.0
 ```
 
-Replace `magpie:v1.0.0` with the version you built. The image includes `/etc/magpie/config.example.toml` as a sanitized template. Keep real MySQL passwords and API secrets in the ignored, mounted `config.toml`. The image has a health check on port `6031`.
+The run script stops and removes the existing `magpie` container before starting the requested version with Docker host networking. The ports come directly from the mounted `config.toml`, and the image already sets the `Asia/Shanghai` timezone. The image includes `/etc/magpie/config.example.toml` as a sanitized template. Keep real MySQL passwords and API secrets in the ignored, mounted `config.toml`. The image has a health check on port `6031`.
 
 ## Reverse Proxy (nginx)
 

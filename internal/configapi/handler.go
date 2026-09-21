@@ -4,7 +4,6 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/bt-smart/btutil/result"
 	"github.com/gin-gonic/gin"
@@ -72,7 +71,7 @@ func (h *Handler) getConfig(c *gin.Context) {
 }
 
 func (h *Handler) authenticate(c *gin.Context) (*store.APIKey, bool) {
-	token := bearerToken(c)
+	token := security.BearerToken(c.GetHeader("Authorization"))
 	if token == "" {
 		c.JSON(http.StatusUnauthorized, result.FailWithMsg("缺少 API 密钥"))
 		return nil, false
@@ -83,16 +82,4 @@ func (h *Handler) authenticate(c *gin.Context) (*store.APIKey, bool) {
 		return nil, false
 	}
 	return apiKey, true
-}
-
-func bearerToken(c *gin.Context) string {
-	header := c.GetHeader("Authorization")
-	if header == "" {
-		return ""
-	}
-	parts := strings.SplitN(header, " ", 2)
-	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
-		return ""
-	}
-	return strings.TrimSpace(parts[1])
 }

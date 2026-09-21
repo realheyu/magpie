@@ -88,7 +88,7 @@ func (h *Handler) login(c *gin.Context) {
 }
 
 func (h *Handler) logout(c *gin.Context) {
-	if token := bearerToken(c); token != "" {
+	if token := security.BearerToken(c.GetHeader("Authorization")); token != "" {
 		h.sessions.Revoke(token)
 	}
 	result.GinOk(c)
@@ -101,23 +101,22 @@ func (h *Handler) me(c *gin.Context) {
 func (h *Handler) listApps(c *gin.Context) {
 	user := currentUser(c)
 	page, pageSize := pagination(c)
-	apps, total, err := h.store.ListAppsForUser(user, strings.TrimSpace(c.Query("query")), page, pageSize)
+	rows, total, err := h.store.ListAppsForUser(user, strings.TrimSpace(c.Query("query")), page, pageSize)
 	if err != nil {
 		fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	items := make([]appResp, 0, len(apps))
-	for i := range apps {
+	items := make([]appResp, 0, len(rows))
+	for i := range rows {
 		permission := domain.PermissionFull
 		if user.Role != domain.RoleAdmin {
-			var err error
-			permission, err = h.store.GetUserAppPermission(user.ID, apps[i].ID)
-			if err != nil || !domain.ValidPermission(permission) {
+			permission = rows[i].Permission
+			if !domain.ValidPermission(permission) {
 				fail(c, http.StatusInternalServerError, "读取应用权限失败")
 				return
 			}
 		}
-		items = append(items, h.toAppResp(&apps[i], user, permission))
+		items = append(items, h.toAppResp(&rows[i].App, user, permission))
 	}
 	result.GinPage(c, items, total)
 }
@@ -127,29 +126,13 @@ func (h *Handler) createApp(c *gin.Context) {
 	if !bindJSON(c, &req) {
 		return
 	}
-	if strings.TrimSpace(req.AppName) == "" {
-		fail(c, http.StatusOK, "应用名不能为空")
-		return
-	}
-	if !domain.ValidAppName(strings.TrimSpace(req.AppName)) {
-		fail(c, http.StatusOK, "应用名只能包含小写字母、数字、- 和 _，且以字母开头，不能使用系统保留名称")
-		return
-	}
-	format, err := domain.ResolveFormat(req.Format)
-	if err != nil {
+	user := currentUser(c)
+	app := &store.App{AppName: req.AppName, Description: req.Description, Format: req.Format, Content: req.Content, Sensitive: req.Sensitive, Status: req.Status}
+	if err := h.store.CreateApp(app, user.ID, req.ChangeSummary); err != nil {
 		fail(c, http.StatusOK, err.Error())
 		return
 	}
-	if err := domain.ValidateContent(format, req.Content); err != nil {
-		fail(c, http.StatusOK, err.Error())
-		return
-	}
-	app := &store.App{AppName: strings.TrimSpace(req.AppName), Description: req.Description, Format: format, Content: req.Content, Sensitive: req.Sensitive, Status: req.Status}
-	if err := h.store.CreateApp(app, currentUser(c).ID, req.ChangeSummary); err != nil {
-		fail(c, http.StatusOK, err.Error())
-		return
-	}
-	result.GinData(c, h.toAppResp(app, currentUser(c), domain.PermissionFull))
+	result.GinData(c, h.toAppResp(app, user, domain.PermissionFull))
 }
 
 func (h *Handler) getApp(c *gin.Context) {
@@ -157,19 +140,21 @@ func (h *Handler) getApp(c *gin.Context) {
 		h.listAppOptions(c)
 		return
 	}
+	user := currentUser(c)
 	app, permission, ok := h.loadVisibleApp(c)
 	if !ok {
 		return
 	}
-	result.GinData(c, h.toAppResp(app, currentUser(c), permission))
+	result.GinData(c, h.toAppResp(app, user, permission))
 }
 
 func (h *Handler) updateApp(c *gin.Context) {
+	user := currentUser(c)
 	app, permission, ok := h.loadVisibleApp(c)
 	if !ok {
 		return
 	}
-	if currentUser(c).Role != domain.RoleAdmin && !domain.CanEdit(permission) {
+	if user.Role != domain.RoleAdmin && !domain.CanEdit(permission) {
 		fail(c, http.StatusForbidden, "没有编辑该应用的权限")
 		return
 	}
@@ -177,25 +162,16 @@ func (h *Handler) updateApp(c *gin.Context) {
 	if !bindJSON(c, &req) {
 		return
 	}
-	format, err := domain.ResolveFormat(req.Format)
-	if err != nil {
-		fail(c, http.StatusOK, err.Error())
-		return
-	}
-	if err := domain.ValidateContent(format, req.Content); err != nil {
-		fail(c, http.StatusOK, err.Error())
-		return
-	}
-	if currentUser(c).Role != domain.RoleAdmin {
+	if user.Role != domain.RoleAdmin {
 		req.Sensitive = app.Sensitive
 		req.Status = app.Status
 	}
-	updated, err := h.store.UpdateApp(app.AppName, req.Description, format, req.Content, req.Sensitive, req.Status, currentUser(c).ID, req.ChangeSummary)
+	updated, err := h.store.UpdateApp(app.AppName, req.Description, req.Format, req.Content, req.Sensitive, req.Status, user.ID, req.ChangeSummary)
 	if err != nil {
 		fail(c, http.StatusOK, err.Error())
 		return
 	}
-	result.GinData(c, h.toAppResp(updated, currentUser(c), domain.PermissionFull))
+	result.GinData(c, h.toAppResp(updated, user, domain.PermissionFull))
 }
 
 func (h *Handler) deleteApp(c *gin.Context) {
@@ -207,10 +183,11 @@ func (h *Handler) deleteApp(c *gin.Context) {
 }
 
 func (h *Handler) listRevisions(c *gin.Context) {
+	user := currentUser(c)
 	appName := c.Param("appName")
 	app, err := h.store.GetAppByName(appName)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) && currentUser(c).Role == domain.RoleAdmin {
+		if errors.Is(err, gorm.ErrRecordNotFound) && user.Role == domain.RoleAdmin {
 			h.listRevisionPage(c, appName, false)
 			return
 		}
@@ -222,19 +199,19 @@ func (h *Handler) listRevisions(c *gin.Context) {
 		return
 	}
 	permission := domain.PermissionFull
-	if currentUser(c).Role != domain.RoleAdmin {
+	if user.Role != domain.RoleAdmin {
 		if app.Status != domain.StatusActive {
 			fail(c, http.StatusNotFound, "应用不存在")
 			return
 		}
 		var permissionErr error
-		permission, permissionErr = h.store.GetUserAppPermission(currentUser(c).ID, app.ID)
+		permission, permissionErr = h.store.GetUserAppPermission(user.ID, app.ID)
 		if permissionErr != nil || !domain.ValidPermission(permission) {
 			fail(c, http.StatusForbidden, "没有查看该应用的权限")
 			return
 		}
 	}
-	h.listRevisionPage(c, app.AppName, currentUser(c).Role != domain.RoleAdmin && permission == domain.PermissionMasked)
+	h.listRevisionPage(c, app.AppName, user.Role != domain.RoleAdmin && permission == domain.PermissionMasked)
 }
 
 func (h *Handler) listRevisionPage(c *gin.Context, appName string, maskSensitive bool) {
@@ -256,11 +233,12 @@ func (h *Handler) listRevisionPage(c *gin.Context, appName string, maskSensitive
 }
 
 func (h *Handler) rollbackApp(c *gin.Context) {
+	user := currentUser(c)
 	_, permission, ok := h.loadVisibleApp(c)
 	if !ok {
 		return
 	}
-	if currentUser(c).Role != domain.RoleAdmin && !domain.CanEdit(permission) {
+	if user.Role != domain.RoleAdmin && !domain.CanEdit(permission) {
 		fail(c, http.StatusForbidden, "没有回滚该应用的权限")
 		return
 	}
@@ -268,12 +246,12 @@ func (h *Handler) rollbackApp(c *gin.Context) {
 	if !bindJSON(c, &req) {
 		return
 	}
-	app, err := h.store.RollbackApp(c.Param("appName"), req.Version, currentUser(c).ID, currentUser(c).Role != domain.RoleAdmin)
+	app, err := h.store.RollbackApp(c.Param("appName"), req.Version, user.ID, user.Role != domain.RoleAdmin)
 	if err != nil {
 		fail(c, http.StatusOK, err.Error())
 		return
 	}
-	result.GinData(c, h.toAppResp(app, currentUser(c), domain.PermissionFull))
+	result.GinData(c, h.toAppResp(app, user, domain.PermissionFull))
 }
 
 func (h *Handler) restoreApp(c *gin.Context) {
@@ -281,7 +259,8 @@ func (h *Handler) restoreApp(c *gin.Context) {
 	if !bindJSON(c, &req) {
 		return
 	}
-	app, err := h.store.RestoreAppFromRevision(c.Param("appName"), req.Version, currentUser(c).ID)
+	user := currentUser(c)
+	app, err := h.store.RestoreAppFromRevision(c.Param("appName"), req.Version, user.ID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			fail(c, http.StatusNotFound, "应用版本不存在")
@@ -290,7 +269,7 @@ func (h *Handler) restoreApp(c *gin.Context) {
 		fail(c, http.StatusOK, err.Error())
 		return
 	}
-	result.GinData(c, h.toAppResp(app, currentUser(c), domain.PermissionFull))
+	result.GinData(c, h.toAppResp(app, user, domain.PermissionFull))
 }
 
 func (h *Handler) listUsers(c *gin.Context) {
@@ -527,7 +506,7 @@ func (h *Handler) listAuditLogs(c *gin.Context) {
 
 func (h *Handler) authRequired() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		token := bearerToken(c)
+		token := security.BearerToken(c.GetHeader("Authorization"))
 		userID, ok := h.sessions.Validate(token)
 		if !ok {
 			fail(c, http.StatusUnauthorized, "请先登录")
@@ -627,30 +606,9 @@ func bindJSON(c *gin.Context, out any) bool {
 	return true
 }
 
-func bearerToken(c *gin.Context) string {
-	header := c.GetHeader("Authorization")
-	if header == "" {
-		return ""
-	}
-	parts := strings.SplitN(header, " ", 2)
-	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
-		return ""
-	}
-	return strings.TrimSpace(parts[1])
-}
-
 func pagination(c *gin.Context) (int, int) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "20"))
-	if page < 1 {
-		page = 1
-	}
-	if pageSize < 1 {
-		pageSize = 20
-	}
-	if pageSize > 100 {
-		pageSize = 100
-	}
 	return page, pageSize
 }
 

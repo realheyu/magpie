@@ -14,7 +14,6 @@ import (
 )
 
 var (
-	ErrNotFound                = gorm.ErrRecordNotFound
 	ErrVersionConflict         = errors.New("配置已被他人修改，请刷新后重试")
 	ErrCannotDeleteCurrentUser = errors.New("不能删除当前登录用户")
 	ErrLastActiveAdmin         = errors.New("至少需要保留一个启用状态的管理员")
@@ -23,10 +22,6 @@ var (
 
 type Store struct {
 	db *gorm.DB
-}
-
-func Open(dsn string) (*Store, error) {
-	return OpenWithLogger(dsn, nil)
 }
 
 func OpenWithLogger(dsn string, gormLogger logger.Interface) (*Store, error) {
@@ -174,7 +169,7 @@ func (s *Store) UpdateUser(id uint64, displayName, password, role, status string
 		return nil, fmt.Errorf("无效的状态：%s", status)
 	}
 	if s.removesActiveAdmin(user, role, status) {
-		canRemove, err := s.hasAnotherActiveAdmin(user.ID)
+		canRemove, err := hasAnotherActiveAdmin(s.db, user.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -223,9 +218,9 @@ func (s *Store) removesActiveAdmin(user User, nextRole string, nextStatus string
 	return user.Role == domain.RoleAdmin && user.Status == domain.StatusActive && (role != domain.RoleAdmin || status != domain.StatusActive)
 }
 
-func (s *Store) hasAnotherActiveAdmin(userID uint64) (bool, error) {
+func hasAnotherActiveAdmin(db *gorm.DB, userID uint64) (bool, error) {
 	var count int64
-	if err := s.db.Model(&User{}).Where("id <> ? AND role = ? AND status = ?", userID, domain.RoleAdmin, domain.StatusActive).Count(&count).Error; err != nil {
+	if err := db.Model(&User{}).Where("id <> ? AND role = ? AND status = ?", userID, domain.RoleAdmin, domain.StatusActive).Count(&count).Error; err != nil {
 		return false, err
 	}
 	return count > 0, nil
@@ -241,11 +236,11 @@ func (s *Store) DeleteUser(id uint64, actorUserID uint64) error {
 			return err
 		}
 		if user.Role == domain.RoleAdmin && user.Status == domain.StatusActive {
-			var count int64
-			if err := tx.Model(&User{}).Where("id <> ? AND role = ? AND status = ?", id, domain.RoleAdmin, domain.StatusActive).Count(&count).Error; err != nil {
+			canRemove, err := hasAnotherActiveAdmin(tx, id)
+			if err != nil {
 				return err
 			}
-			if count == 0 {
+			if !canRemove {
 				return ErrLastActiveAdmin
 			}
 		}
@@ -372,22 +367,25 @@ func (s *Store) GetAppByName(appName string) (*App, error) {
 	return &app, nil
 }
 
-func (s *Store) ListAppsForUser(user *User, query string, page, pageSize int) ([]App, int64, error) {
+// ListAppsForUser 返回用户可见的应用列表；非管理员通过 JOIN 权限表带出该用户的权限值，
+// 避免在 handler 里逐行再查一次权限。
+func (s *Store) ListAppsForUser(user *User, query string, page, pageSize int) ([]AppWithPermission, int64, error) {
 	db := s.db.Model(&App{})
 	if query != "" {
 		db = db.Where("app_name LIKE ? OR description LIKE ?", "%"+query+"%", "%"+query+"%")
 	}
 	if user.Role != domain.RoleAdmin {
 		db = db.Where("apps.status = ?", domain.StatusActive).
-			Joins("JOIN user_app_permissions uap ON uap.app_id = apps.id AND uap.user_id = ?", user.ID)
+			Joins("JOIN user_app_permissions uap ON uap.app_id = apps.id AND uap.user_id = ?", user.ID).
+			Select("apps.*, uap.permission AS permission")
 	}
 	var total int64
 	if err := db.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
-	var apps []App
-	err := db.Order("apps.app_name ASC").Offset(offset(page, pageSize)).Limit(pageSize).Find(&apps).Error
-	return apps, total, err
+	var rows []AppWithPermission
+	err := db.Order("apps.app_name ASC").Offset(offset(page, pageSize)).Limit(pageSize).Find(&rows).Error
+	return rows, total, err
 }
 
 func (s *Store) ListAppOptions(query string) ([]App, error) {

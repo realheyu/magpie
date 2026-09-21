@@ -38,3 +38,15 @@ func APIKeyPreview(apiKey string) string {
 	}
 	return fmt.Sprintf("%s...%s", apiKey[:8], apiKey[len(apiKey)-4:])
 }
+
+// BearerToken 从 Authorization 请求头的值里解析 Bearer token，缺失或格式不对返回空串。
+func BearerToken(header string) string {
+	if header == "" {
+		return ""
+	}
+	parts := strings.SplitN(header, " ", 2)
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+		return ""
+	}
+	return strings.TrimSpace(parts[1])
+}

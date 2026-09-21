@@ -20,6 +20,12 @@ type App struct {
 	DeletedAt   gorm.DeletedAt `gorm:"index"`
 }
 
+// AppWithPermission 是应用列表的查询结果行，非管理员路径下 Permission 来自权限表 JOIN。
+type AppWithPermission struct {
+	App
+	Permission string
+}
+
 type AppRevision struct {
 	ID              uint64    `gorm:"primaryKey"`
 	AppID           uint64    `gorm:"not null;index"`
