@@ -369,6 +369,8 @@ func (s *Store) GetAppByName(appName string) (*App, error) {
 
 // ListAppsForUser 返回用户可见的应用列表；非管理员通过 JOIN 权限表带出该用户的权限值，
 // 避免在 handler 里逐行再查一次权限。
+// 两个分支都必须显式 Select：否则 GORM 会按 Find 目标 AppWithPermission（含 Permission 列）
+// 智能选列，拼出不存在的 apps.permission。
 func (s *Store) ListAppsForUser(user *User, query string, page, pageSize int) ([]AppWithPermission, int64, error) {
 	db := s.db.Model(&App{})
 	if query != "" {
@@ -376,12 +378,16 @@ func (s *Store) ListAppsForUser(user *User, query string, page, pageSize int) ([
 	}
 	if user.Role != domain.RoleAdmin {
 		db = db.Where("apps.status = ?", domain.StatusActive).
-			Joins("JOIN user_app_permissions uap ON uap.app_id = apps.id AND uap.user_id = ?", user.ID).
-			Select("apps.*, uap.permission AS permission")
+			Joins("JOIN user_app_permissions uap ON uap.app_id = apps.id AND uap.user_id = ?", user.ID)
 	}
 	var total int64
 	if err := db.Count(&total).Error; err != nil {
 		return nil, 0, err
+	}
+	if user.Role != domain.RoleAdmin {
+		db = db.Select("apps.*, uap.permission")
+	} else {
+		db = db.Select("apps.*")
 	}
 	var rows []AppWithPermission
 	err := db.Order("apps.app_name ASC").Offset(offset(page, pageSize)).Limit(pageSize).Find(&rows).Error
