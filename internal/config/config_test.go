@@ -77,7 +77,7 @@ func TestLoadIgnoresMissingConfigFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("missing config file should use defaults: %v", err)
 	}
-	if cfg.Server.AdminAddr != ":6030" || cfg.MySQL.Url != Default().MySQL.Url {
+	if cfg.Server.AdminAddr != ":6080" || cfg.MySQL.Url != Default().MySQL.Url {
 		t.Fatalf("unexpected defaults: %+v", cfg)
 	}
 }

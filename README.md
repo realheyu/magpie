@@ -57,8 +57,8 @@ go run ./cmd/magpie
 
 The binary starts two HTTP servers:
 
-- Admin console and admin API: `http://localhost:6030`
-- Config API: `http://localhost:6031`
+- Admin console and admin API: `http://localhost:6080`
+- Config API: `http://localhost:6081`
 
 Start the frontend dev server:
 
@@ -103,7 +103,7 @@ Start the image with the configuration kept outside the image:
 ./scripts/run.sh v1.0.0
 ```
 
-The run script stops and removes the existing `magpie` container before starting the requested version with Docker host networking. The ports come directly from the mounted `config.toml`, and the image already sets the `Asia/Shanghai` timezone. The image includes `/etc/magpie/config.example.toml` as a sanitized template. Keep real MySQL passwords and API secrets in the ignored, mounted `config.toml`. The image has a health check on port `6031`.
+The run script stops and removes the existing `magpie` container before starting the requested version with Docker host networking. The ports come directly from the mounted `config.toml`, and the image already sets the `Asia/Shanghai` timezone. The image includes `/etc/magpie/config.example.toml` as a sanitized template. Keep real MySQL passwords and API secrets in the ignored, mounted `config.toml`. The image has a health check on port `6081`.
 
 ## Reverse Proxy (nginx)
 
@@ -114,25 +114,25 @@ The admin console (SPA + `/api/admin/*`) is served entirely by the `adminAddr` s
 
 For sub-path deployment two things must agree:
 
-1. The nginx location: `location /magpie/ { proxy_pass http://127.0.0.1:6030/; }` (the trailing slash on `proxy_pass` strips the prefix).
+1. The nginx location: `location /magpie/ { proxy_pass http://127.0.0.1:6080/; }` (the trailing slash on `proxy_pass` strips the prefix).
 2. The backend config: `server.webBasePath = "/magpie"` in `config.toml`. The backend replaces the `window.__MAGPIE_BASE__` placeholder in the embedded `index.html` with this value; the Vue router and API requests are prefixed with it at runtime.
 
-One frontend build works for both deployments: assets are referenced with relative paths, and the deploy prefix is injected at request time. When both front and back run behind nginx, bind the magpie ports to loopback (`adminAddr = "127.0.0.1:6030"`) so the admin server is not exposed directly.
+One frontend build works for both deployments: assets are referenced with relative paths, and the deploy prefix is injected at request time. When both front and back run behind nginx, bind the magpie ports to loopback (`adminAddr = "127.0.0.1:6080"`) so the admin server is not exposed directly.
 
-The SDK API (`:6031`) is independent of the console path; SDK clients should point at `http://host:6031` directly. Do not expect `https://test.example.com/magpie/v1/...` to work through the console location — it forwards to the admin port, which has no `/v1` routes; proxying the SDK through nginx needs its own location block (see the commented example in `deploy/nginx-subpath.conf`).
+The SDK API (`:6081`) is independent of the console path; SDK clients should point at `http://host:6081` directly. Do not expect `https://test.example.com/magpie/v1/...` to work through the console location — it forwards to the admin port, which has no `/v1` routes; proxying the SDK through nginx needs its own location block (see the commented example in `deploy/nginx-subpath.conf`).
 
 ## Config API
 
 Read the full config content for an app:
 
 ```sh
-curl -H 'Authorization: Bearer mgp_xxx' http://localhost:6031/v1/configs/app2-prod
+curl -H 'Authorization: Bearer mgp_xxx' http://localhost:6081/v1/configs/app2-prod
 ```
 
 Read metadata-wrapped JSON:
 
 ```sh
-curl -H 'Authorization: Bearer mgp_xxx' 'http://localhost:6031/v1/configs/app2-prod?meta=true'
+curl -H 'Authorization: Bearer mgp_xxx' 'http://localhost:6081/v1/configs/app2-prod?meta=true'
 ```
 
 The config endpoint sets `ETag` and honors `If-None-Match` with `304 Not Modified`.
@@ -163,7 +163,7 @@ import (
 
 func main() {
 	client, err := magpiesdk.New(magpiesdk.Options{
-		Endpoint: "http://localhost:6031",
+		Endpoint: "http://localhost:6081",
 		AppName:  "app2-prod",
 		APIKey:   "mgp_xxx",
 	})
@@ -210,7 +210,7 @@ err := client.Watch(context.Background(), 30*time.Second, func(snapshot magpiesd
 仓库里也提供了一个可直接运行的示例程序：
 
 ```sh
-MAGPIE_ENDPOINT=http://magpie.example.com:6031 \
+MAGPIE_ENDPOINT=http://magpie.example.com:6081 \
 MAGPIE_APP_NAME=app2-prod \
 MAGPIE_API_KEY=mgp_xxx \
 go run ./examples/go-sdk
@@ -226,7 +226,7 @@ go run ./examples/go-sdk -print-content
 
 ```sh
 go run ./examples/go-sdk \
-  -endpoint http://magpie.example.com:6031 \
+  -endpoint http://magpie.example.com:6081 \
   -app app2-prod \
   -api-key mgp_xxx
 ```

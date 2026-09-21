@@ -150,10 +150,10 @@ func TestNewValidatesOptions(t *testing.T) {
 	if _, err := New(Options{}); err == nil {
 		t.Fatal("expected empty endpoint to fail")
 	}
-	if _, err := New(Options{Endpoint: "http://127.0.0.1:6031", APIKey: "mgp"}); err == nil {
+	if _, err := New(Options{Endpoint: "http://127.0.0.1:6081", APIKey: "mgp"}); err == nil {
 		t.Fatal("expected empty appName to fail")
 	}
-	if _, err := New(Options{Endpoint: "http://127.0.0.1:6031", AppName: "app"}); err == nil {
+	if _, err := New(Options{Endpoint: "http://127.0.0.1:6081", AppName: "app"}); err == nil {
 		t.Fatal("expected empty apiKey to fail")
 	}
 }

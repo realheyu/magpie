@@ -55,7 +55,7 @@ func main() {
 运行：
 
 ```sh
-MAGPIE_ENDPOINT=http://magpie.example.com:6031 \
+MAGPIE_ENDPOINT=http://magpie.example.com:6081 \
 MAGPIE_APP_NAME=app2-prod \
 MAGPIE_API_KEY=mgp_xxx \
 go run ./examples/go-sdk

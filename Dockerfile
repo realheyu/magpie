@@ -47,7 +47,7 @@ COPY --from=go-build /out/magpie /usr/local/bin/magpie
 COPY config.example.toml /etc/magpie/config.example.toml
 
 USER magpie
-EXPOSE 6030 6031
+EXPOSE 6080 6081
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s \
-    CMD wget -qO- http://127.0.0.1:6031/healthz >/dev/null || exit 1
+    CMD wget -qO- http://127.0.0.1:6081/healthz >/dev/null || exit 1
 ENTRYPOINT ["magpie"]

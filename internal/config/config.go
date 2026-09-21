@@ -73,8 +73,8 @@ func Load() (Config, error) {
 func Default() Config {
 	return Config{
 		Server: ServerConfig{
-			AdminAddr: ":6030",
-			APIAddr:   ":6031",
+			AdminAddr: ":6080",
+			APIAddr:   ":6081",
 			GinMode:   "release",
 		},
 		MySQL: MySQLConfig{

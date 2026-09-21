@@ -15,7 +15,7 @@ import (
 )
 
 func main() {
-	endpoint := flag.String("endpoint", env("MAGPIE_ENDPOINT", ""), "Magpie 配置 API 地址，例如 http://magpie.example.com:6031")
+	endpoint := flag.String("endpoint", env("MAGPIE_ENDPOINT", ""), "Magpie 配置 API 地址，例如 http://magpie.example.com:6081")
 	appName := flag.String("app", env("MAGPIE_APP_NAME", ""), "应用名，例如 app2-prod")
 	apiKey := flag.String("api-key", env("MAGPIE_API_KEY", ""), "API Key，也可以使用 MAGPIE_API_KEY 环境变量")
 	timeout := flag.Duration("timeout", 5*time.Second, "单次请求超时时间")
@@ -26,7 +26,7 @@ func main() {
 
 	if *endpoint == "" || *appName == "" || *apiKey == "" {
 		fmt.Fprintln(os.Stderr, "缺少参数：endpoint、app、api-key 都不能为空")
-		fmt.Fprintln(os.Stderr, "示例：MAGPIE_ENDPOINT=http://magpie.example.com:6031 MAGPIE_APP_NAME=app2-prod MAGPIE_API_KEY=mgp_xxx go run ./examples/go-sdk")
+		fmt.Fprintln(os.Stderr, "示例：MAGPIE_ENDPOINT=http://magpie.example.com:6081 MAGPIE_APP_NAME=app2-prod MAGPIE_API_KEY=mgp_xxx go run ./examples/go-sdk")
 		os.Exit(2)
 	}
 
