@@ -18,6 +18,7 @@ COPY web/ ./
 RUN pnpm build
 
 FROM golang:${GO_VERSION}-alpine AS go-deps
+ENV GOPROXY=https://goproxy.cn,direct
 WORKDIR /src
 RUN apk add --no-cache ca-certificates git
 COPY go.mod go.sum ./
