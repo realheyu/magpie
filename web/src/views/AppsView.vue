@@ -178,6 +178,7 @@ import { Plus, RefreshLeft } from '@element-plus/icons-vue'
 import { api, type AppConfig, type Revision } from '@/api/client'
 import CodeEditor from '@/components/CodeEditor.vue'
 import { formatDateTime } from '@/utils/format'
+import { isDialogCancel } from '@/utils/dialog'
 import { useAuthStore } from '@/stores/auth'
 
 const auth = useAuthStore()
@@ -381,7 +382,4 @@ function statusText(status?: string) {
   return status === 'disabled' ? '禁用' : '启用'
 }
 
-function isDialogCancel(err: unknown) {
-  return err === 'cancel' || err === 'close'
-}
 </script>

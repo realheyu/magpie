@@ -115,6 +115,7 @@ import { Plus } from '@element-plus/icons-vue'
 import { api, type AppOption, type User } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 import { formatDateTime } from '@/utils/format'
+import { isDialogCancel } from '@/utils/dialog'
 
 const auth = useAuthStore()
 const users = ref<User[]>([])
@@ -276,7 +277,4 @@ function availableApps(currentAppName: string) {
   return apps.value.filter((app) => app.appName === currentAppName || !selected.has(app.appName))
 }
 
-function isDialogCancel(err: unknown) {
-  return err === 'cancel' || err === 'close'
-}
 </script>

@@ -99,6 +99,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { api, type APIKeyItem, type AppOption } from '@/api/client'
 import { formatDateTime } from '@/utils/format'
+import { isDialogCancel } from '@/utils/dialog'
 
 const keys = ref<APIKeyItem[]>([])
 const apps = ref<AppOption[]>([])
@@ -197,7 +198,4 @@ function statusText(status?: string) {
   return status === 'disabled' ? '禁用' : '启用'
 }
 
-function isDialogCancel(err: unknown) {
-  return err === 'cancel' || err === 'close'
-}
 </script>

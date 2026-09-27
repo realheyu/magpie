@@ -78,7 +78,11 @@ func (h *Handler) authenticate(c *gin.Context) (*store.APIKey, bool) {
 	}
 	apiKey, err := h.store.FindActiveAPIKeyByHash(security.HashAPIKey(token))
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, result.FailWithMsg("API 密钥无效"))
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusUnauthorized, result.FailWithMsg("API 密钥无效"))
+		} else {
+			c.JSON(http.StatusInternalServerError, result.FailWithMsg(err.Error()))
+		}
 		return nil, false
 	}
 	return apiKey, true
